@@ -9,6 +9,12 @@ A phone-only ticket system for the **UCM YDSA Swap Shop**. It replaces paper tic
 - **Everything is stored in a Google Sheet**, so you get a live, readable record of every ticket
   given and spent. It's free and needs no server or app install.
 
+**The link for everyone:** https://hotpotatoes3.github.io/Mobile-ticket-system/
+
+How it fits together: the page is hosted on GitHub Pages (`docs/`). It saves and reads tickets
+through a small Google Apps Script (`apps-script/Code.gs`) attached to the Sheet. The page never
+uses anyone's Google sign-in, so it works no matter how many Google accounts a phone is logged into.
+
 ## How it works at the table
 
 **Donation drop-off (Oct 5–22, during tabling or by appointment)**
@@ -32,15 +38,16 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
 
 **Stats tab:** number of people, tickets given, spent, and still unspent, plus recent activity.
 
-## One-time setup (about 10 minutes)
+## One-time setup
+
+### 1. The Google Sheet and script (about 10 minutes, needs a computer)
 
 1. **Create the Sheet.** Make a new Google Sheet in the org's Google account
    (e.g. "Swap Shop Tickets").
-2. **Add the code.** In the Sheet: **Extensions → Apps Script**.
-   - Replace the contents of `Code.gs` with [`apps-script/Code.gs`](apps-script/Code.gs).
-   - Click **+ → HTML**, name it `Index` (exactly), and paste in
-     [`apps-script/Index.html`](apps-script/Index.html).
-   - Optional: change `EVENT_NAME` at the top of `Code.gs`.
+2. **Add the code.** In the Sheet: **Extensions → Apps Script**. Replace the contents of `Code.gs`
+   with [`apps-script/Code.gs`](apps-script/Code.gs) (use GitHub's **Copy raw file** button so
+   nothing gets cut off; the last function is `sheetSafe_`). If you had an `Index` HTML file there
+   from an earlier version, delete it. It isn't used anymore.
 3. **Set the staff PIN.** Click ⚙️ **Project Settings → Script properties → Add script property**:
    name `STAFF_PIN`, value: a passphrase you'll share only with volunteers (use something longer than
    4 digits, e.g. `swap-shop-oct23`).
@@ -49,16 +56,30 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
    `Balances` tabs appear in the Sheet.
 5. **Publish it.** **Deploy → New deployment → ⚙️ Web app**:
    - *Execute as:* **Me**
-   - *Who has access:* **Anyone** (so donors don't need a Google account to view their tickets)
+   - *Who has access:* **Anyone** (required, or the ticket page can't reach it)
 
-   Copy the **Web app URL**. That's the link for everyone.
-6. **Share it.** Send the link plus the PIN to volunteers. Each volunteer opens it, taps
-   **Volunteer login**, and enters their name and the PIN once. Their phone remembers it.
-   Tip: "Add to Home Screen" makes it feel like an app.
-   You can also print the link as a QR code on the poster ("Check your tickets").
+   Copy the **Web app URL** (ends in `/exec`).
 
-> **Changed the code later?** Use **Deploy → Manage deployments → ✏️ Edit → Version: New version**
-> so the link stays the same. Creating a *new* deployment gives you a different URL.
+> **Changed `Code.gs` later?** Use **Deploy → Manage deployments → ✏️ Edit → Version: New version**
+> so the URL stays the same. Creating a *new* deployment gives you a different URL, which you'd
+> then have to put in `docs/config.js`.
+
+### 2. The ticket page (about 2 minutes)
+
+1. Put the Web app URL in [`docs/config.js`](docs/config.js) as `apiUrl`. It's already set to the
+   current deployment, so you only need to change it if you make a new deployment.
+2. On GitHub: **Settings → Pages → Build and deployment → Source: Deploy from a branch**, pick the
+   repository's default branch and the **`/docs`** folder, then **Save**. After about a minute the
+   page is live at https://hotpotatoes3.github.io/Mobile-ticket-system/.
+
+### 3. Share it
+
+Send the link plus the PIN to volunteers. Each volunteer opens it, taps **Volunteer login**, and
+enters their name and the PIN once. Their phone remembers it. Tip: "Add to Home Screen" makes it
+feel like an app. You can also print the link as a QR code on the poster ("Check your tickets").
+
+Old QR codes that point at the `script.google.com` link still work. That link now just sends
+people on to the ticket page.
 
 ## Good to know
 
@@ -77,8 +98,8 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
 
 ## For developers
 
-`dev/server.js` runs `Code.gs` in Node against an in-memory fake spreadsheet so you can try the
-UI without Google:
+`dev/server.js` serves `docs/index.html` and runs `Code.gs` in Node against an in-memory fake
+spreadsheet, so you can try everything without Google:
 
 ```bash
 npm run dev     # http://localhost:8080, staff PIN 1234
@@ -89,7 +110,8 @@ Files:
 
 | File | What it is |
 | --- | --- |
-| `apps-script/Code.gs` | Server: ticket rules, PIN check, Sheet storage |
-| `apps-script/Index.html` | The phone UI (donor ticket page + volunteer tools) |
+| `apps-script/Code.gs` | Backend: ticket rules, PIN check, Sheet storage, JSON API (`doPost`) |
+| `docs/index.html` | The phone UI (donor ticket page + volunteer tools), served by GitHub Pages |
+| `docs/config.js` | Event name and the Apps Script URL the page talks to |
 | `apps-script/appsscript.json` | Apps Script manifest (for use with `clasp`) |
 | `dev/` | Local preview server and end-to-end test |

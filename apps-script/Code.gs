@@ -7,10 +7,12 @@
  *            their Ledger "Change" column, so the Sheet is the source of truth
  *            and doubles as an audit log.
  *
- * Staff actions require the STAFF_PIN script property (see README).
+ * The ticket page itself is hosted on GitHub Pages (docs/) and calls doPost
+ * below. Staff actions require the STAFF_PIN script property (see README).
  */
 
 var EVENT_NAME = 'UCM YDSA Swap Shop';
+var PAGE_URL = 'https://hotpotatoes3.github.io/Mobile-ticket-system/'; // the GitHub Pages site
 var MAX_TICKETS_PER_ENTRY = 50; // guards against fat-finger typos
 var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var CODE_LENGTH = 5;
@@ -25,13 +27,47 @@ var M = { CODE: 0, NAME: 1, CONTACT: 2, CREATED: 3, CREATED_BY: 4 };
 var L = { TS: 0, CODE: 1, NAME: 2, CHANGE: 3, TYPE: 4, NOTE: 5, STAFF: 6, ID: 7, UNDOES: 8 };
 
 // ---------------------------------------------------------------------------
-// Web app entry point
+// Web app entry points
 // ---------------------------------------------------------------------------
 
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle(EVENT_NAME + ' Tickets')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+/** Functions the ticket page may call. Anything else is refused. */
+var API = {
+  getConfig: getConfig,
+  getWallet: getWallet,
+  staffLogin: staffLogin,
+  searchMembers: searchMembers,
+  getMemberForStaff: getMemberForStaff,
+  createMember: createMember,
+  addTickets: addTickets,
+  redeemTickets: redeemTickets,
+  undoEntry: undoEntry,
+  getStats: getStats
+};
+
+/** JSON API used by the ticket page: body is {"fn": "...", "args": [...]}. */
+function doPost(e) {
+  var reply;
+  try {
+    var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    var fn = API.hasOwnProperty(req.fn) ? API[req.fn] : null;
+    if (!fn) throw new Error('Unknown request.');
+    reply = { ok: true, result: fn.apply(null, Array.isArray(req.args) ? req.args : []) };
+  } catch (err) {
+    reply = { ok: false, error: String((err && err.message) || err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(reply)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/** Opening the script URL directly (e.g. an old QR code) points people to the ticket page. */
+function doGet(e) {
+  var code = normalizeCode_(e && e.parameter && e.parameter.m);
+  var url = PAGE_URL + (code ? '?m=' + code : '');
+  return HtmlService.createHtmlOutput(
+    '<p style="font:18px sans-serif;text-align:center;margin-top:40px">' +
+      '<a href="' + url + '" target="_top">Open your Swap Shop tickets &rarr;</a></p>' +
+      '<script>try { window.top.location.href = ' + JSON.stringify(url) + '; } catch (e) {}</script>'
+  ).setTitle(EVENT_NAME + ' Tickets')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 /** Run once from the Apps Script editor to create the sheets. Safe to re-run. */
@@ -56,7 +92,7 @@ function setup() {
 // ---------------------------------------------------------------------------
 
 function getConfig() {
-  return { eventName: EVENT_NAME, appUrl: ScriptApp.getService().getUrl(), maxPerEntry: MAX_TICKETS_PER_ENTRY };
+  return { eventName: EVENT_NAME, maxPerEntry: MAX_TICKETS_PER_ENTRY };
 }
 
 /** What a ticket holder sees on their own phone. */

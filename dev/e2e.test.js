@@ -20,7 +20,7 @@ async function main() {
   };
   const shot = async (page, name) => SHOTS && page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
   const rpc = (page, fn, ...args) => page.evaluate(([fn, args]) =>
-    fetch('/rpc', { method: 'POST', body: JSON.stringify({ fn, args }) }).then((r) => r.json()), [fn, args]);
+    fetch('/api', { method: 'POST', body: JSON.stringify({ fn, args }) }).then((r) => r.json()), [fn, args]);
   const balance = (page) => page.locator('#balance').innerText().then(Number);
   const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 
@@ -53,6 +53,8 @@ async function main() {
     assert(await staff.locator('.qr canvas, .qr img').count() > 0, 'QR code not drawn');
     const code = (await staff.locator('.codebig').innerText()).trim();
     assert.match(code, /^[A-Z2-9]{5}$/);
+    // qrcodejs puts the encoded text in the title attribute.
+    assert.strictEqual(await staff.locator('.qr').getAttribute('title'), BASE + '?m=' + code);
     assert(await noHScroll(staff), 'member page scrolls sideways');
     assert(!(await staff.locator('#app').innerText()).startsWith('null'), 'stray null rendered');
     await shot(staff, '2-registered');
@@ -134,7 +136,8 @@ async function main() {
     assert.match(await err('undoEntry', '1234', 'x', undoneId), /already undone/);
     const undoRow = hist.find((e) => e.type === 'UNDO').id;
     assert.match(await err('undoEntry', '1234', 'x', undoRow), /can't be undone/);
-    assert.match(await err('searchMembers_', '1234'), /Unknown function/);
+    assert.match(await err('searchMembers_', '1234'), /Unknown request/);
+    assert.match(await err('constructor'), /Unknown request/);
 
     console.log('All e2e checks passed. Ticket code used:', code);
   } finally {

@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top">
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Swap Shop Tickets</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%9F%EF%B8%8F%3C/text%3E%3C/svg%3E">
+  <script src="config.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     :root {
@@ -120,17 +123,36 @@
 // Helpers
 // ---------------------------------------------------------------------------
 const app = document.getElementById('app');
-const state = { config: null, pin: '', staff: '', tab: 'find', code: '' };
+const state = { pin: '', staff: '', tab: 'find', code: '' };
 
 const store = {
   get(k) { try { return localStorage.getItem('swapshop.' + k) || ''; } catch (e) { return ''; } },
   set(k, v) { try { v ? localStorage.setItem('swapshop.' + k, v) : localStorage.removeItem('swapshop.' + k); } catch (e) {} }
 };
 
-function call(fn, ...args) {
-  return new Promise((resolve, reject) => {
-    google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
-  });
+const CONFIG = Object.assign({ eventName: 'Swap Shop', maxPerEntry: 50 }, window.SWAP_SHOP);
+
+/**
+ * Calls a function in the Apps Script backend (Code.gs doPost).
+ * text/plain avoids a CORS preflight, which Apps Script can't answer. No cookies
+ * are sent, so it works no matter how many Google accounts the browser has.
+ */
+async function call(fn, ...args) {
+  if (!CONFIG.apiUrl) throw new Error('apiUrl is not set in config.js. See the README.');
+  let res;
+  try {
+    res = await fetch(CONFIG.apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ fn, args }),
+    });
+  } catch (e) {
+    throw new Error('Can\'t reach the ticket server. Check your internet connection and try again.');
+  }
+  let data;
+  try { data = await res.json(); } catch (e) { throw new Error('The ticket server sent an unexpected reply. Try again.'); }
+  if (!data.ok) throw new Error(data.error || 'Something went wrong.');
+  return data.result;
 }
 
 function errMsg(e) { return (e && e.message ? e.message : String(e)).replace(/^Exception:\s*/, ''); }
@@ -178,7 +200,7 @@ function fmtTime(iso) {
   if (isNaN(d)) return '';
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
-function walletUrl(code) { return state.config.appUrl + '?m=' + encodeURIComponent(code); }
+function walletUrl(code) { return location.origin + location.pathname + '?m=' + encodeURIComponent(code); }
 function isStaff() { return !!state.pin; }
 
 function qrBox(code) {
@@ -208,7 +230,8 @@ function changeCell(e) {
 // Navigation
 // ---------------------------------------------------------------------------
 function go(params) {
-  try { google.script.history.push(null, params); } catch (e) {}
+  const qs = new URLSearchParams(params).toString();
+  history.pushState(null, '', location.pathname + (qs ? '?' + qs : ''));
   route(params);
 }
 
@@ -382,7 +405,7 @@ function stepper(initial, min) {
   const num = h('span', { class: 'n' }, n);
   const listeners = [];
   const set = (v) => {
-    n = Math.max(min, Math.min(state.config.maxPerEntry, v));
+    n = Math.max(min, Math.min(CONFIG.maxPerEntry, v));
     num.textContent = n;
     listeners.forEach((fn) => fn(n));
   };
@@ -529,14 +552,11 @@ function renderStaffMember(m, flash) {
 (async function init() {
   state.pin = store.get('pin');
   state.staff = store.get('staff');
-  try {
-    state.config = await call('getConfig');
-    document.getElementById('title').firstChild.textContent = state.config.eventName;
-  } catch (e) {
-    return render(h('div', { class: 'notice err' }, 'Could not load: ' + errMsg(e)));
-  }
-  google.script.history.setChangeHandler((ev) => route(ev.location.parameter || {}));
-  google.script.url.getLocation((loc) => route(loc.parameter || {}));
+  document.getElementById('title').firstChild.textContent = CONFIG.eventName;
+  document.title = CONFIG.eventName + ' Tickets';
+  const params = () => Object.fromEntries(new URLSearchParams(location.search));
+  window.addEventListener('popstate', () => route(params()));
+  route(params());
 })();
 </script>
 </body>

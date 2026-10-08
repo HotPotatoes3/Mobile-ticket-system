@@ -1,5 +1,6 @@
-// Local preview of the Apps Script app: runs Code.gs in Node against an
-// in-memory fake spreadsheet, so the UI can be tried and tested without Google.
+// Local preview: serves the ticket page from docs/ and runs apps-script/Code.gs
+// in Node against an in-memory fake spreadsheet, so everything can be tried and
+// tested without Google.
 //   node dev/server.js            -> http://localhost:8080  (staff PIN: 1234)
 const fs = require('fs');
 const http = require('http');
@@ -8,6 +9,7 @@ const vm = require('vm');
 const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..', 'apps-script');
+const DOCS = path.join(__dirname, '..', 'docs');
 const PORT = Number(process.env.PORT || 8080);
 const PIN = process.env.STAFF_PIN || '1234';
 
@@ -39,8 +41,13 @@ function createBackend() {
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k === 'STAFF_PIN' ? PIN : null) }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     Utilities: { sleep() {}, getUuid: () => crypto.randomUUID() },
-    ScriptApp: { getService: () => ({ getUrl: () => process.env.APP_URL || `http://localhost:${PORT}/` }) },
-    HtmlService: {},
+    ContentService: {
+      MimeType: { JSON: 'json' },
+      createTextOutput: (text) => ({ setMimeType() { return this; }, getContent: () => text }),
+    },
+    HtmlService: {
+      createHtmlOutput: (html) => ({ setTitle() { return this; }, addMetaTag() { return this; }, getContent: () => html }),
+    },
     Logger: { log() {} },
     Date, Math, String, Number, Error, JSON, Object,
   };
@@ -50,66 +57,43 @@ function createBackend() {
   return { ctx, sheets };
 }
 
-// Stand-in for the google.script.* client API that Apps Script injects.
-const CLIENT_SHIM = `<script>
-(function () {
-  function runner(ok, fail) {
-    return new Proxy({}, { get(_, prop) {
-      if (prop === 'withSuccessHandler') return (f) => runner(f, fail);
-      if (prop === 'withFailureHandler') return (f) => runner(ok, f);
-      return (...args) => fetch('/rpc', { method: 'POST', body: JSON.stringify({ fn: prop, args }) })
-        .then((r) => r.json())
-        .then((r) => (r.error ? fail && fail(new Error(r.error)) : ok && ok(r.result)));
-    } });
-  }
-  const params = () => Object.fromEntries(new URLSearchParams(location.search));
-  let onChange = null;
-  window.addEventListener('popstate', () => onChange && onChange({ location: { parameter: params() } }));
-  window.google = { script: {
-    run: runner(null, null),
-    url: { getLocation: (cb) => setTimeout(() => cb({ parameter: params() })) },
-    history: {
-      push: (st, p) => history.pushState(st, '', '?' + new URLSearchParams(p || {})),
-      setChangeHandler: (f) => { onChange = f; },
-    },
-  } };
-})();
-</script>`;
-
 function start() {
   let backend = createBackend();
   const server = http.createServer((req, res) => {
-    if (req.method === 'POST' && req.url === '/rpc') {
+    const url = new URL(req.url, 'http://localhost');
+    if (req.method === 'POST' && url.pathname === '/api') {
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
-        const { fn, args } = JSON.parse(body);
-        let out;
-        try {
-          if (typeof backend.ctx[fn] !== 'function' || fn.endsWith('_')) throw new Error('Unknown function ' + fn);
-          out = { result: JSON.parse(JSON.stringify(backend.ctx[fn](...args))) };
-        } catch (e) {
-          out = { error: e.message };
-        }
+        const out = backend.ctx.doPost({ postData: { contents: body } });
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(out));
+        res.end(out.getContent());
       });
       return;
     }
-    if (req.method === 'POST' && req.url === '/__reset') {
+    if (req.method === 'POST' && url.pathname === '/__reset') {
       backend = createBackend();
       res.end('ok');
       return;
     }
-    if (req.url === '/__sheets') {
+    if (url.pathname === '/__sheets') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(Object.fromEntries(Object.entries(backend.sheets).map(([k, s]) => [k, s.rows]))));
       return;
     }
-    const html = fs.readFileSync(path.join(ROOT, 'Index.html'), 'utf8')
-      .replace('<head>', '<head><meta name="viewport" content="width=device-width, initial-scale=1">' + CLIENT_SHIM);
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(html);
+    if (url.pathname === '/config.js') {
+      // Same settings as docs/config.js, but pointed at this local server.
+      res.writeHead(200, { 'content-type': 'text/javascript' });
+      res.end("window.SWAP_SHOP = { eventName: 'UCM YDSA Swap Shop', apiUrl: '/api', maxPerEntry: 50 };");
+      return;
+    }
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(fs.readFileSync(path.join(DOCS, 'index.html')));
+      return;
+    }
+    res.writeHead(404);
+    res.end('not found');
   });
   return new Promise((resolve) => server.listen(PORT, () => resolve(server)));
 }
