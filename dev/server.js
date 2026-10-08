@@ -39,7 +39,7 @@ function createBackend() {
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k === 'STAFF_PIN' ? PIN : null) }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     Utilities: { sleep() {}, getUuid: () => crypto.randomUUID() },
-    ScriptApp: { getService: () => ({ getUrl: () => `http://localhost:${PORT}/` }) },
+    ScriptApp: { getService: () => ({ getUrl: () => process.env.APP_URL || `http://localhost:${PORT}/` }) },
     HtmlService: {},
     Logger: { log() {} },
     Date, Math, String, Number, Error, JSON, Object,

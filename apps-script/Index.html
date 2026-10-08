@@ -73,7 +73,7 @@
     .codebig { text-align: center; font-size: 30px; font-weight: 800; letter-spacing: 6px; margin: 6px 0; }
     .muted { color: var(--muted); font-size: 14px; }
     .center { text-align: center; }
-    .qr { display: flex; justify-content: center; padding: 12px; background: #fff; border-radius: 12px; width: fit-content; margin: 8px auto; }
+    .qr { display: flex; justify-content: center; padding: 24px; background: #fff; border-radius: 12px; width: fit-content; margin: 8px auto; }
     .stepper { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 8px 0 4px; }
     .stepper button { width: 56px; height: 56px; font-size: 28px; border-radius: 50%; padding: 0; }
     .stepper .n { font-size: 44px; font-weight: 800; min-width: 70px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -103,6 +103,7 @@
     #toast.show { transform: translateX(-50%) translateY(0); visibility: visible; }
     #toast.err { background: var(--red); color: #fff; }
     #staffBtn { white-space: nowrap; flex-shrink: 0; }
+    .qr img, .qr canvas { image-rendering: pixelated; max-width: 100%; height: auto; }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -183,7 +184,16 @@ function isStaff() { return !!state.pin; }
 function qrBox(code) {
   const box = h('div', { class: 'qr' });
   try {
-    new QRCode(box, { text: walletUrl(code), width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+    // Low error correction keeps the code coarse, and a whole number of pixels
+    // per square keeps the squares even — both make phone cameras read it faster.
+    const opts = { text: walletUrl(code), width: 246, height: 246, correctLevel: QRCode.CorrectLevel.L };
+    const qr = new QRCode(box, opts);
+    const modules = qr._oQRCode && qr._oQRCode.getModuleCount();
+    if (modules && 246 % modules) {
+      box.replaceChildren();
+      const size = modules * Math.max(5, Math.round(246 / modules));
+      new QRCode(box, Object.assign(opts, { width: size, height: size }));
+    }
   } catch (e) {
     box.append(h('span', { class: 'muted' }, 'QR unavailable — use the code below.'));
   }
