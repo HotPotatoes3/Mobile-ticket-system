@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root {
+      --bg: #fbf8f4;
+      --card: #ffffff;
+      --ink: #1d1b19;
+      --muted: #6d6863;
+      --line: #e6e0d9;
+      --red: #d3262b;
+      --red-ink: #ffffff;
+      --green: #1f8a4c;
+      --green-ink: #ffffff;
+      --soft-red: #fde9e8;
+      --soft-green: #e4f4ea;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171514;
+        --card: #221f1d;
+        --ink: #f3efea;
+        --muted: #a39d96;
+        --line: #36312d;
+        --red: #ef4a4f;
+        --green: #34b36b;
+        --soft-red: #3a1f1f;
+        --soft-green: #1b3326;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 16px 16px 48px;
+      max-width: 520px;
+      margin: 0 auto;
+      -webkit-text-size-adjust: 100%;
+    }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+    h1 { font-size: 22px; margin: 0; color: var(--red); letter-spacing: -0.3px; }
+    h1 small { display: block; font-size: 13px; color: var(--muted); font-weight: 500; letter-spacing: 0; }
+    h2 { font-size: 17px; margin: 0 0 12px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+    label { display: block; font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
+    input {
+      width: 100%; font-size: 17px; padding: 12px; border-radius: 10px;
+      border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    }
+    input.code { text-transform: uppercase; letter-spacing: 4px; font-weight: 700; text-align: center; font-size: 22px; }
+    button {
+      font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 13px 16px;
+      cursor: pointer; background: var(--line); color: var(--ink); min-height: 48px;
+    }
+    button:disabled { opacity: 0.5; }
+    button.primary { background: var(--red); color: var(--red-ink); }
+    button.go { background: var(--green); color: var(--green-ink); }
+    button.link { background: none; color: var(--muted); padding: 8px; min-height: 0; text-decoration: underline; font-weight: 500; }
+    button.small { padding: 6px 10px; min-height: 0; font-size: 13px; border-radius: 8px; }
+    .full { width: 100%; margin-top: 12px; }
+    .row { display: flex; gap: 10px; }
+    .row > * { flex: 1; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+    .tabs button { flex: 1; background: var(--card); border: 1px solid var(--line); }
+    .tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+    .balance { text-align: center; padding: 8px 0; }
+    .balance .num { font-size: 76px; font-weight: 800; line-height: 1; color: var(--red); font-variant-numeric: tabular-nums; }
+    .balance .lbl { color: var(--muted); }
+    .who { text-align: center; font-size: 20px; font-weight: 700; }
+    .codebig { text-align: center; font-size: 30px; font-weight: 800; letter-spacing: 6px; margin: 6px 0; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .center { text-align: center; }
+    .qr { display: flex; justify-content: center; padding: 12px; background: #fff; border-radius: 12px; width: fit-content; margin: 8px auto; }
+    .stepper { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 8px 0 4px; }
+    .stepper button { width: 56px; height: 56px; font-size: 28px; border-radius: 50%; padding: 0; }
+    .stepper .n { font-size: 44px; font-weight: 800; min-width: 70px; text-align: center; font-variant-numeric: tabular-nums; }
+    ul.list { list-style: none; margin: 0; padding: 0; }
+    ul.list li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+    ul.list li:first-child { border-top: 0; }
+    ul.list .grow { flex: 1; min-width: 0; }
+    ul.list .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chg { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
+    .chg.plus { color: var(--green); }
+    .chg.minus { color: var(--red); }
+    .struck .title, .struck .chg { text-decoration: line-through; opacity: 0.55; }
+    .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--line); color: var(--muted); }
+    .clickable { cursor: pointer; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat { background: var(--bg); border-radius: 12px; padding: 12px; text-align: center; }
+    .stat b { display: block; font-size: 28px; }
+    .notice { padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 14px; }
+    .notice.err { background: var(--soft-red); color: var(--red); }
+    .notice.ok { background: var(--soft-green); color: var(--green); }
+    #toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px);
+      background: var(--ink); color: var(--bg); padding: 12px 18px; border-radius: 12px;
+      font-weight: 600; transition: transform 0.25s, visibility 0.25s; max-width: calc(100% - 32px); z-index: 10;
+      visibility: hidden;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); visibility: visible; }
+    #toast.err { background: var(--red); color: #fff; }
+    #staffBtn { white-space: nowrap; flex-shrink: 0; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Swap Shop<small>Digital tickets</small></h1>
+    <button id="staffBtn" class="link small hidden"></button>
+  </header>
+  <div id="app"><p class="muted center">Loading…</p></div>
+  <div id="toast"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+const app = document.getElementById('app');
+const state = { config: null, pin: '', staff: '', tab: 'find', code: '' };
+
+const store = {
+  get(k) { try { return localStorage.getItem('swapshop.' + k) || ''; } catch (e) { return ''; } },
+  set(k, v) { try { v ? localStorage.setItem('swapshop.' + k, v) : localStorage.removeItem('swapshop.' + k); } catch (e) {} }
+};
+
+function call(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
+  });
+}
+
+function errMsg(e) { return (e && e.message ? e.message : String(e)).replace(/^Exception:\s*/, ''); }
+
+/** Tiny element builder: h('div', {class: 'x', onclick: fn}, 'text', child, ...). Text is never parsed as HTML. */
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'class') el.className = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+function render(...nodes) { app.replaceChildren(...nodes.filter((n) => n != null)); window.scrollTo(0, 0); }
+
+let toastTimer;
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = isErr ? 'err' : ''; }, isErr ? 4000 : 2200);
+}
+
+/** Disables a button while an async action runs, and shows errors as a toast. */
+async function busy(btn, fn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Working…';
+  try { return await fn(); }
+  catch (e) { toast(errMsg(e), true); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+function fmtTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function walletUrl(code) { return state.config.appUrl + '?m=' + encodeURIComponent(code); }
+function isStaff() { return !!state.pin; }
+
+function qrBox(code) {
+  const box = h('div', { class: 'qr' });
+  try {
+    new QRCode(box, { text: walletUrl(code), width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  } catch (e) {
+    box.append(h('span', { class: 'muted' }, 'QR unavailable — use the code below.'));
+  }
+  return box;
+}
+
+function changeCell(e) {
+  return h('span', { class: 'chg ' + (e.change > 0 ? 'plus' : 'minus') }, (e.change > 0 ? '+' : '') + e.change);
+}
+
+// ---------------------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------------------
+function go(params) {
+  try { google.script.history.push(null, params); } catch (e) {}
+  route(params);
+}
+
+function route(params) {
+  state.code = (params.m || '').toUpperCase();
+  updateHeader();
+  if (state.code) return isStaff() ? showStaffMember(state.code, params.fresh === '1' ? { showQr: true } : null) : showWallet(state.code);
+  if (params.staff === '1' && !isStaff()) return showLogin();
+  return isStaff() ? showStaffHome() : showHome();
+}
+
+function updateHeader() {
+  const btn = document.getElementById('staffBtn');
+  btn.classList.remove('hidden');
+  if (isStaff()) {
+    btn.textContent = state.staff + ' · Log out';
+    btn.onclick = () => { state.pin = ''; store.set('pin', ''); toast('Logged out'); go({}); };
+  } else {
+    btn.textContent = 'Volunteer login';
+    btn.onclick = () => go({ staff: '1' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public views
+// ---------------------------------------------------------------------------
+function showHome() {
+  const input = h('input', { class: 'code', id: 'codeInput', placeholder: 'ABC12', maxlength: '8', autocomplete: 'off', autocapitalize: 'characters' });
+  const open = () => { const c = input.value.trim(); if (c) go({ m: c.toUpperCase() }); };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(); });
+  render(
+    h('div', { class: 'card' },
+      h('h2', {}, 'Check your tickets'),
+      h('p', { class: 'muted' }, 'Enter the code a volunteer gave you when you dropped off donations.'),
+      input,
+      h('button', { class: 'primary full', onclick: open }, 'Show my tickets')
+    ),
+    h('div', { class: 'card' },
+      h('h2', {}, 'How it works'),
+      h('ul', { class: 'muted' },
+        h('li', {}, 'Drop off clean donations in good condition — 1 item = 1 ticket.'),
+        h('li', {}, 'Your tickets live on your phone. Bookmark or screenshot your ticket page.'),
+        h('li', {}, 'At the shop, show your QR code to spend tickets on goods.')
+      )
+    )
+  );
+}
+
+async function showWallet(code) {
+  render(h('p', { class: 'muted center' }, 'Loading tickets…'));
+  try {
+    const w = await call('getWallet', code);
+    render(
+      h('div', { class: 'card' },
+        h('div', { class: 'who' }, w.name),
+        h('div', { class: 'balance' },
+          h('div', { class: 'num', id: 'balance' }, w.balance),
+          h('div', { class: 'lbl' }, w.balance === 1 ? 'ticket' : 'tickets')
+        ),
+        qrBox(w.code),
+        h('div', { class: 'codebig' }, w.code),
+        h('p', { class: 'muted center' }, 'Show this screen at the Swap Shop. Bookmark or screenshot it so you don\'t lose it!')
+      ),
+      historyCard(w.history, false),
+      h('button', { class: 'link', onclick: () => showWallet(code) }, 'Refresh')
+    );
+  } catch (e) {
+    render(
+      h('div', { class: 'notice err' }, errMsg(e)),
+      h('button', { class: 'full', onclick: () => go({}) }, 'Back')
+    );
+  }
+}
+
+function historyCard(history, staffMode, onUndo) {
+  const items = history.map((e) => {
+    const undoBtn = staffMode && !e.undone && e.type !== 'UNDO'
+      ? h('button', { class: 'small', onclick: (ev) => onUndo(e, ev.currentTarget) }, 'Undo')
+      : null;
+    return h('li', { class: e.undone ? 'struck' : '' },
+      h('div', { class: 'grow' },
+        h('div', { class: 'title' }, e.note || e.type),
+        h('div', { class: 'muted' }, fmtTime(e.ts), staffMode && e.staff ? ' · ' + e.staff : '', e.undone ? ' · undone' : '')
+      ),
+      changeCell(e),
+      undoBtn
+    );
+  });
+  return h('div', { class: 'card' },
+    h('h2', {}, 'History'),
+    items.length ? h('ul', { class: 'list' }, items) : h('p', { class: 'muted' }, 'No activity yet.')
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Staff views
+// ---------------------------------------------------------------------------
+function showLogin() {
+  const name = h('input', { id: 'staffName', placeholder: 'e.g. Maya', value: store.get('staff'), autocomplete: 'name' });
+  const pin = h('input', { id: 'staffPin', type: 'password', placeholder: 'Ask an organizer', autocomplete: 'current-password' });
+  const btn = h('button', { class: 'primary full' }, 'Log in');
+  const submit = () => busy(btn, async () => {
+    if (!name.value.trim()) throw new Error('Enter your name so entries can be traced.');
+    await call('staffLogin', pin.value);
+    state.pin = pin.value;
+    state.staff = name.value.trim();
+    store.set('pin', state.pin);
+    store.set('staff', state.staff);
+    toast('Welcome, ' + state.staff + '!');
+    go({});
+  });
+  btn.addEventListener('click', submit);
+  pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  render(
+    h('div', { class: 'card' },
+      h('h2', {}, 'Volunteer login'),
+      h('label', { for: 'staffName' }, 'Your name'), name,
+      h('label', { for: 'staffPin' }, 'Staff PIN'), pin,
+      btn
+    ),
+    h('button', { class: 'link', onclick: () => go({}) }, 'Back')
+  );
+}
+
+function showStaffHome() {
+  const tabs = [['find', 'Find'], ['new', 'New donor'], ['stats', 'Stats']];
+  const body = h('div', {});
+  const tabBar = h('div', { class: 'tabs' }, tabs.map(([id, label]) =>
+    h('button', { class: state.tab === id ? 'on' : '', onclick: () => { state.tab = id; showStaffHome(); } }, label)
+  ));
+  render(tabBar, body);
+  if (state.tab === 'find') findTab(body);
+  else if (state.tab === 'new') newDonorTab(body);
+  else statsTab(body);
+}
+
+function findTab(body) {
+  const input = h('input', { id: 'search', placeholder: 'Code, name, or phone', autocomplete: 'off' });
+  const results = h('ul', { class: 'list' });
+  let timer, seq = 0;
+  const search = async () => {
+    const mySeq = ++seq;
+    try {
+      const rows = await call('searchMembers', state.pin, input.value);
+      if (mySeq !== seq) return;
+      results.replaceChildren(...(rows.length ? rows.map((r) =>
+        h('li', { class: 'clickable', onclick: () => go({ m: r.code }) },
+          h('div', { class: 'grow' },
+            h('div', { class: 'title' }, r.name),
+            h('div', { class: 'muted' }, h('span', { class: 'pill' }, r.code), r.contact ? ' ' + r.contact : '')
+          ),
+          h('span', { class: 'chg' }, plural(r.balance, 'ticket'))
+        )) : [h('li', { class: 'muted' }, 'No matches. Add them under "New donor".')]));
+    } catch (e) { toast(errMsg(e), true); }
+  };
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 300); });
+  body.append(
+    h('div', { class: 'card' },
+      h('h2', {}, 'Find a person'),
+      input,
+      h('p', { class: 'muted' }, 'Tip: ticket holders can also show their QR — scan it with your phone camera.'),
+      results
+    )
+  );
+  search();
+  input.focus();
+}
+
+function stepper(initial, min) {
+  let n = initial;
+  const num = h('span', { class: 'n' }, n);
+  const listeners = [];
+  const set = (v) => {
+    n = Math.max(min, Math.min(state.config.maxPerEntry, v));
+    num.textContent = n;
+    listeners.forEach((fn) => fn(n));
+  };
+  const el = h('div', { class: 'stepper' },
+    h('button', { 'aria-label': 'Fewer', onclick: () => set(n - 1) }, '−'),
+    num,
+    h('button', { 'aria-label': 'More', onclick: () => set(n + 1) }, '+')
+  );
+  return { el, get: () => n, set, onChange: (fn) => listeners.push(fn) };
+}
+
+function newDonorTab(body) {
+  const name = h('input', { id: 'newName', placeholder: 'First name + last initial', autocomplete: 'off' });
+  const contact = h('input', { id: 'newContact', placeholder: 'Phone or email (optional, helps find them later)', autocomplete: 'off', inputmode: 'email' });
+  const count = stepper(1, 0);
+  const btn = h('button', { class: 'go full' });
+  const label = (n) => { btn.textContent = n ? 'Register + give ' + plural(n, 'ticket') : 'Register (no tickets yet)'; };
+  label(count.get());
+  count.onChange(label);
+  btn.addEventListener('click', () => busy(btn, async () => {
+    const m = await call('createMember', state.pin, state.staff, name.value, contact.value, count.get(), '');
+    toast(m.matchedExisting ? 'Already registered — added to ' + m.name : 'Registered ' + m.name);
+    go({ m: m.code, fresh: '1' });
+  }));
+  body.append(
+    h('div', { class: 'card' },
+      h('h2', {}, 'New donor'),
+      h('label', { for: 'newName' }, 'Name'), name,
+      h('label', { for: 'newContact' }, 'Phone or email'), contact,
+      h('label', {}, 'Items donated (1 item = 1 ticket)'), count.el,
+      btn
+    )
+  );
+  name.focus();
+}
+
+async function statsTab(body) {
+  body.append(h('p', { class: 'muted center' }, 'Loading…'));
+  try {
+    const s = await call('getStats', state.pin);
+    const stat = (n, l) => h('div', { class: 'stat' }, h('b', {}, n), h('span', { class: 'muted' }, l));
+    body.replaceChildren(
+      h('div', { class: 'card' },
+        h('h2', {}, 'Totals'),
+        h('div', { class: 'stats' },
+          stat(s.people, 'people'), stat(s.outstanding, 'tickets unspent'),
+          stat(s.issued, 'tickets given'), stat(s.redeemed, 'tickets spent')
+        )
+      ),
+      h('div', { class: 'card' },
+        h('h2', {}, 'Recent activity'),
+        s.recent.length ? h('ul', { class: 'list' }, s.recent.map((e) =>
+          h('li', { class: 'clickable' + (e.undone ? ' struck' : ''), onclick: () => go({ m: e.code }) },
+            h('div', { class: 'grow' },
+              h('div', { class: 'title' }, e.name + ' — ' + e.note),
+              h('div', { class: 'muted' }, fmtTime(e.ts), e.staff ? ' · ' + e.staff : '')
+            ),
+            changeCell(e)
+          ))) : h('p', { class: 'muted' }, 'Nothing yet.')
+      )
+    );
+  } catch (e) { body.replaceChildren(h('div', { class: 'notice err' }, errMsg(e))); }
+}
+
+async function showStaffMember(code, flash) {
+  render(h('p', { class: 'muted center' }, 'Loading…'));
+  let m;
+  try {
+    m = await call('getMemberForStaff', state.pin, code);
+  } catch (e) {
+    const msg = errMsg(e);
+    if (/PIN/.test(msg)) { state.pin = ''; store.set('pin', ''); updateHeader(); return showWallet(code); }
+    return render(h('div', { class: 'notice err' }, msg), h('button', { class: 'full', onclick: () => go({}) }, 'Back'));
+  }
+  renderStaffMember(m, flash);
+}
+
+function renderStaffMember(m, flash) {
+  const count = stepper(1, 1);
+  const note = h('input', { id: 'note', placeholder: 'Note (optional)', autocomplete: 'off' });
+  const addBtn = h('button', { class: 'go', id: 'addBtn' });
+  const redeemBtn = h('button', { class: 'primary', id: 'redeemBtn' });
+  const labels = (n) => {
+    addBtn.textContent = '+ Give ' + n;
+    redeemBtn.textContent = '− Spend ' + n;
+    redeemBtn.disabled = n > m.balance;
+  };
+  labels(count.get());
+  count.onChange(labels);
+
+  const act = (btn, fn, verb) => busy(btn, async () => {
+    const updated = await call(fn, state.pin, state.staff, m.code, count.get(), note.value);
+    renderStaffMember(updated, { ok: verb + ' ' + plural(count.get(), 'ticket') + '. New balance: ' + updated.balance });
+  }).finally(() => labels(count.get()));
+  addBtn.addEventListener('click', () => act(addBtn, 'addTickets', 'Gave'));
+  redeemBtn.addEventListener('click', () => act(redeemBtn, 'redeemTickets', 'Spent'));
+
+  const onUndo = (entry, btn) => {
+    if (btn.dataset.armed !== '1') {
+      btn.dataset.armed = '1';
+      btn.textContent = 'Tap to confirm';
+      setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Undo'; }, 4000);
+      return;
+    }
+    busy(btn, async () => {
+      const updated = await call('undoEntry', state.pin, state.staff, entry.id);
+      renderStaffMember(updated, { ok: 'Undone. New balance: ' + updated.balance });
+    });
+  };
+
+  const qrCard = h('div', { class: 'card center' },
+    h('h2', {}, 'Give them their ticket'),
+    h('p', { class: 'muted' }, 'Have them scan this with their phone camera and bookmark the page — or write down the code.'),
+    qrBox(m.code),
+    h('div', { class: 'codebig' }, m.code)
+  );
+  const qrToggle = h('button', { class: 'full', onclick: () => { qrCard.classList.toggle('hidden'); } }, 'Show / hide their QR code');
+  if (!(flash && flash.showQr)) qrCard.classList.add('hidden');
+
+  render(
+    flash && flash.ok ? h('div', { class: 'notice ok', id: 'flash' }, flash.ok) : null,
+    h('div', { class: 'card' },
+      h('div', { class: 'who' }, m.name),
+      h('div', { class: 'center muted' }, h('span', { class: 'pill' }, m.code), m.contact ? ' ' + m.contact : ''),
+      h('div', { class: 'balance' },
+        h('div', { class: 'num', id: 'balance' }, m.balance),
+        h('div', { class: 'lbl' }, m.balance === 1 ? 'ticket' : 'tickets')
+      ),
+      count.el,
+      h('div', { class: 'row' }, addBtn, redeemBtn),
+      note,
+      h('p', { class: 'muted' }, 'Give = donations dropped off. Spend = goods taken at the shop.')
+    ),
+    qrCard,
+    qrToggle,
+    historyCard(m.history, true, onUndo),
+    h('button', { class: 'full', onclick: () => { state.tab = 'find'; go({}); } }, '← Back to search')
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+(async function init() {
+  state.pin = store.get('pin');
+  state.staff = store.get('staff');
+  try {
+    state.config = await call('getConfig');
+    document.getElementById('title').firstChild.textContent = state.config.eventName;
+  } catch (e) {
+    return render(h('div', { class: 'notice err' }, 'Could not load: ' + errMsg(e)));
+  }
+  google.script.history.setChangeHandler((ev) => route(ev.location.parameter || {}));
+  google.script.url.getLocation((loc) => route(loc.parameter || {}));
+})();
+</script>
+</body>
+</html>

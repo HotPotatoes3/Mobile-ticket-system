@@ -1,0 +1,9 @@
+{
+  "name": "swap-shop-tickets",
+  "private": true,
+  "description": "Digital ticket system for the UCM YDSA Swap Shop (Google Apps Script + Google Sheets).",
+  "scripts": {
+    "dev": "node dev/server.js",
+    "test": "node dev/e2e.test.js"
+  }
+}
