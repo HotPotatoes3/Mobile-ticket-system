@@ -6,6 +6,8 @@
  *   Ledger:  one row per ticket change. A person's balance is the sum of
  *            their Ledger "Change" column, so the Sheet is the source of truth
  *            and doubles as an audit log.
+ *   Items:   one row per donated item (name + description), linked to the
+ *            Ledger donation that gave the tickets for it.
  *
  * The ticket page itself is hosted on GitHub Pages (docs/) and calls doPost
  * below. Staff actions require the STAFF_PIN script property (see README).
@@ -13,18 +15,22 @@
 
 var EVENT_NAME = 'UCM YDSA Swap Shop';
 var PAGE_URL = 'https://hotpotatoes3.github.io/Mobile-ticket-system/'; // the GitHub Pages site
+var API_VERSION = 2; // 2 = donations are itemized
 var MAX_TICKETS_PER_ENTRY = 50; // guards against fat-finger typos
 var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var CODE_LENGTH = 5;
 
 var MEMBERS_SHEET = 'Members';
 var LEDGER_SHEET = 'Ledger';
+var ITEMS_SHEET = 'Items';
 var MEMBERS_HEADER = ['Code', 'Name', 'Contact', 'Created', 'Created by'];
 var LEDGER_HEADER = ['Timestamp', 'Code', 'Name', 'Change', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes'];
+var ITEMS_HEADER = ['Timestamp', 'Code', 'Donor', 'Item', 'Description', 'Entry ID', 'Staff', 'Status'];
 
 // Column indexes (0-based) into the rows above.
 var M = { CODE: 0, NAME: 1, CONTACT: 2, CREATED: 3, CREATED_BY: 4 };
 var L = { TS: 0, CODE: 1, NAME: 2, CHANGE: 3, TYPE: 4, NOTE: 5, STAFF: 6, ID: 7, UNDOES: 8 };
+var I = { TS: 0, CODE: 1, DONOR: 2, ITEM: 3, DESC: 4, ENTRY: 5, STAFF: 6, STATUS: 7 };
 
 // ---------------------------------------------------------------------------
 // Web app entry points
@@ -74,6 +80,7 @@ function doGet(e) {
 function setup() {
   getSheet_(MEMBERS_SHEET, MEMBERS_HEADER);
   getSheet_(LEDGER_SHEET, LEDGER_HEADER);
+  getSheet_(ITEMS_SHEET, ITEMS_HEADER);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss.getSheetByName('Balances')) {
     // Live per-person totals, handy to print as a paper backup before the shop opens.
@@ -92,7 +99,8 @@ function setup() {
 // ---------------------------------------------------------------------------
 
 function getConfig() {
-  return { eventName: EVENT_NAME, maxPerEntry: MAX_TICKETS_PER_ENTRY };
+  // apiVersion lets the ticket page refuse to run against an outdated copy of this script.
+  return { eventName: EVENT_NAME, maxPerEntry: MAX_TICKETS_PER_ENTRY, apiVersion: API_VERSION };
 }
 
 /** What a ticket holder sees on their own phone. */
@@ -147,16 +155,16 @@ function getMemberForStaff(pin, code) {
 
 /**
  * Register a new donor and (optionally) credit their first donation in one step.
+ * `items` is a list of {name, description} (1 item = 1 ticket), or a plain count.
  * If the contact matches someone already registered, credits that person instead
  * of creating a duplicate.
  */
-function createMember(pin, staff, name, contact, tickets, note) {
+function createMember(pin, staff, name, contact, items, note) {
   checkPin_(pin);
   name = cleanText_(name, 60);
   contact = cleanText_(contact, 80);
   if (!name) throw new Error('Please enter a name.');
-  tickets = Number(tickets) || 0;
-  if (tickets) validateCount_(tickets);
+  var donation = parseDonation_(items, note, true);
 
   return withLock_(function () {
     var data = loadData_();
@@ -171,23 +179,21 @@ function createMember(pin, staff, name, contact, tickets, note) {
       );
       data.byCode[code] = { code: code, name: name, contact: contact };
     }
-    if (tickets) {
-      appendEntry_(data.byCode[code], tickets, 'DONATION', note || 'Donated ' + tickets + ' item(s)', staff, '');
-    }
+    if (donation.count) donate_(data.byCode[code], donation, staff);
     var result = getMemberForStaff(pin, code);
     result.matchedExisting = !!existing;
     return result;
   });
 }
 
-/** Donation drop-off: 1 item = 1 ticket. */
-function addTickets(pin, staff, code, count, note) {
+/** Donation drop-off: `items` is a list of {name, description} (1 item = 1 ticket), or a plain count. */
+function addTickets(pin, staff, code, items, note) {
   checkPin_(pin);
-  validateCount_(count);
+  var donation = parseDonation_(items, note, false);
   return withLock_(function () {
     var data = loadData_();
     var member = requireMember_(data, code);
-    appendEntry_(member, Number(count), 'DONATION', note || 'Donated ' + count + ' item(s)', staff, '');
+    donate_(member, donation, staff);
     return getMemberForStaff(pin, member.code);
   });
 }
@@ -226,6 +232,7 @@ function undoEntry(pin, staff, entryId) {
       throw new Error('Undoing this would make the balance negative (tickets were already spent).');
     }
     appendEntry_(member, reversal, 'UNDO', 'Undo: ' + entry.note, staff, entryId);
+    if (entry.items.length) markItemsUndone_(entryId);
     return getMemberForStaff(pin, member.code);
   });
 }
@@ -301,6 +308,16 @@ function loadData_() {
   var byCode = {};
   members.forEach(function (m) { byCode[m.code] = m; });
 
+  var itemsByEntry = {};
+  readRows_(ITEMS_SHEET, ITEMS_HEADER).forEach(function (r) {
+    var entryId = String(r[I.ENTRY]);
+    if (!entryId || !r[I.ITEM]) return;
+    (itemsByEntry[entryId] = itemsByEntry[entryId] || []).push({
+      name: String(r[I.ITEM]),
+      description: String(r[I.DESC])
+    });
+  });
+
   var balances = {};
   var undone = {};
   var entries = readRows_(LEDGER_SHEET, LEDGER_HEADER)
@@ -317,6 +334,7 @@ function loadData_() {
         id: String(r[L.ID]),
         undoes: String(r[L.UNDOES])
       };
+      e.items = itemsByEntry[e.id] || [];
       balances[e.code] = (balances[e.code] || 0) + e.change;
       if (e.undoes) undone[e.undoes] = true;
       return e;
@@ -335,6 +353,56 @@ function appendEntry_(member, change, type, note, staff, undoes) {
   return id;
 }
 
+/**
+ * Normalizes a donation given as a list of {name, description} items or as a
+ * plain ticket count. Blank item rows are ignored.
+ */
+function parseDonation_(items, note, allowEmpty) {
+  var list = [];
+  var count;
+  if (Array.isArray(items)) {
+    items.forEach(function (it) {
+      var name = cleanText_(it && it.name, 60);
+      var description = cleanText_(it && it.description, 200);
+      if (!name && !description) return;
+      if (!name) throw new Error('Every item needs a name (e.g. "Jacket").');
+      list.push({ name: name, description: description });
+    });
+    count = list.length;
+    if (!count && !allowEmpty) throw new Error('List at least one item.');
+  } else {
+    count = Number(items) || 0;
+  }
+  if (count || !allowEmpty) validateCount_(count);
+  var names = list.map(function (it) { return it.name; }).join(', ');
+  return {
+    count: count,
+    items: list,
+    note: cleanText_(note, 120) || (names ? 'Donated: ' + names : 'Donated ' + count + ' item(s)')
+  };
+}
+
+function donate_(member, donation, staff) {
+  var entryId = appendEntry_(member, donation.count, 'DONATION', donation.note, staff, '');
+  if (donation.items.length) {
+    var now = new Date();
+    var rows = donation.items.map(function (it) {
+      return [now, member.code, member.name, it.name, it.description, entryId, cleanText_(staff, 40), ''].map(sheetSafe_);
+    });
+    var sheet = getSheet_(ITEMS_SHEET, ITEMS_HEADER);
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, ITEMS_HEADER.length).setValues(rows);
+  }
+  return entryId;
+}
+
+/** Flags an undone donation's items in the Items tab (rows are kept for the record). */
+function markItemsUndone_(entryId) {
+  var sheet = getSheet_(ITEMS_SHEET, ITEMS_HEADER);
+  readRows_(ITEMS_SHEET, ITEMS_HEADER).forEach(function (r, i) {
+    if (String(r[I.ENTRY]) === entryId) sheet.getRange(i + 2, I.STATUS + 1).setValue('Undone');
+  });
+}
+
 function entriesFor_(data, code) {
   return data.entries.filter(function (e) { return e.code === code; }).reverse();
 }
@@ -345,7 +413,7 @@ function publicWallet_(member, data) {
     name: member.name,
     balance: data.balances[member.code] || 0,
     history: entriesFor_(data, member.code).map(function (e) {
-      return { ts: e.ts, change: e.change, type: e.type, note: e.note };
+      return { ts: e.ts, change: e.change, type: e.type, note: e.note, items: e.items, undone: e.undone };
     })
   };
 }
@@ -353,7 +421,7 @@ function publicWallet_(member, data) {
 function staffEntry_(e) {
   return {
     id: e.id, ts: e.ts, code: e.code, name: e.name, change: e.change,
-    type: e.type, note: e.note, staff: e.staff, undone: e.undone
+    type: e.type, note: e.note, staff: e.staff, undone: e.undone, items: e.items
   };
 }
 

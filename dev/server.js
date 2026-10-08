@@ -15,18 +15,30 @@ const PIN = process.env.STAFF_PIN || '1234';
 
 function fakeSheet(name) {
   const rows = [];
+  // Like Sheets, a leading apostrophe forces plain text and isn't part of the value.
+  const unquote = (v) => (typeof v === 'string' && v.startsWith("'") ? v.slice(1) : v);
   return {
     name,
     rows,
-    appendRow(r) { rows.push(r.map((v) => (typeof v === 'string' && v.startsWith("'") ? v.slice(1) : v))); },
+    appendRow(r) { rows.push(r.map(unquote)); },
     setFrozenRows() {},
     getLastRow() { return rows.length; },
-    getRange(row, col, numRows, numCols) {
-      return { getValues: () => rows.slice(row - 1, row - 1 + numRows).map((r) => {
-        const out = r.slice(col - 1, col - 1 + numCols);
-        while (out.length < numCols) out.push('');
-        return out;
-      }) };
+    getRange(row, col, numRows = 1, numCols = 1) {
+      return {
+        getValues: () => rows.slice(row - 1, row - 1 + numRows).map((r) => {
+          const out = r.slice(col - 1, col - 1 + numCols);
+          while (out.length < numCols) out.push('');
+          return out;
+        }),
+        setValues(values) {
+          values.forEach((vals, i) => {
+            const r = (rows[row - 1 + i] = rows[row - 1 + i] || []);
+            vals.forEach((v, j) => { r[col - 1 + j] = unquote(v); });
+          });
+          return this;
+        },
+        setValue(v) { return this.setValues([[v]]); },
+      };
     },
   };
 }

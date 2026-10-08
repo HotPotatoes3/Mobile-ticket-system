@@ -19,22 +19,36 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
 
 **Donation drop-off (Oct 5–22, during tabling or by appointment)**
 1. Volunteer opens the app → **New donor** → types a name (and phone/email if they'll give it)
-   → sets the number of items → **Register + give N tickets**.
+   → lists each item dropped off → **Register + give N tickets**. Each item gets a name (tap a
+   quick button like **+ Jacket**, or type one) and an optional description ("blue denim, size M").
+   The ticket count is the number of items listed.
 2. A QR code appears. The donor scans it with their phone camera and bookmarks or screenshots
    the page. Or they can just write down the 5-letter code.
 3. Someone who comes back with more donations: **Find** them by name, phone, or code
-   → **+ Give**. If you register someone again with the same phone or email, the app spots that
+   → **Donation** → list the items → **+ Give**. If you register someone again with the same phone or email, the app spots that
    and adds the tickets to their existing account.
 
 **Shop day (Oct 23, 6–8pm, Pavilion Lawn)**
 1. The shopper shows their ticket page. A volunteer either scans the QR with their phone camera
    (this opens that person's account with the staff buttons) or searches by name or code.
-2. Set the number of items → **− Spend**. The app won't let anyone spend more tickets than they have.
+2. Tap **Shop** (the app remembers this for the next person) → set the number of items
+   → **− Spend**. The app won't let anyone spend more tickets than they have.
 
 **Mistakes:** every entry has an **Undo** button (tap it twice). The original row stays in the
 Sheet and a reversing row is added, so nothing is ever silently deleted.
 
 **Lost code?** Volunteers can search by name or phone and show the QR again.
+
+**The spreadsheet tabs:**
+- **Items**: one row per donated item: when, who donated it, item name, description, and the
+  volunteer who logged it. Sort or filter it like any sheet (e.g. to count jackets). If a donation
+  is undone, its items stay but the **Status** column says `Undone`.
+- **Ledger**: every ticket change (donations, spends, undos). Balances are calculated from this.
+- **Members**: everyone registered, with their code and contact.
+- **Balances**: live total of tickets per person.
+
+The Items tab is created automatically the first time items are logged. You don't need to re-run
+`setup`.
 
 **Stats tab:** number of people, tickets given, spent, and still unspent, plus recent activity.
 
@@ -52,8 +66,8 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
    name `STAFF_PIN`, value: a passphrase you'll share only with volunteers (use something longer than
    4 digits, e.g. `swap-shop-oct23`).
 4. **Create the tabs.** Back in the editor, pick `setup` in the function dropdown and click **Run**.
-   Approve the permission prompt (it asks to edit this spreadsheet). `Members`, `Ledger`, and
-   `Balances` tabs appear in the Sheet.
+   Approve the permission prompt (it asks to edit this spreadsheet). `Members`, `Ledger`,
+   `Items`, and `Balances` tabs appear in the Sheet.
 5. **Publish it.** **Deploy → New deployment → ⚙️ Web app**:
    - *Execute as:* **Me**
    - *Who has access:* **Anyone** (required, or the ticket page can't reach it)

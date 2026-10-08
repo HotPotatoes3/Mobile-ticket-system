@@ -88,7 +88,7 @@
     .chg { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
     .chg.plus { color: var(--green); }
     .chg.minus { color: var(--red); }
-    .struck .title, .struck .chg { text-decoration: line-through; opacity: 0.55; }
+    .struck .title, .struck .chg, .struck .items-given { text-decoration: line-through; opacity: 0.55; }
     .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--line); color: var(--muted); }
     .clickable { cursor: pointer; }
     .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -107,6 +107,19 @@
     #toast.err { background: var(--red); color: #fff; }
     #staffBtn { white-space: nowrap; flex-shrink: 0; }
     .qr img, .qr canvas { image-rendering: pixelated; max-width: 100%; height: auto; }
+    .items { counter-reset: item; }
+    .item-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+    .item-row:first-child { border-top: 0; }
+    .item-row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .item-row .item-desc { font-size: 15px; padding: 9px 12px; }
+    .item-num { flex: none; width: 28px; height: 28px; margin-top: 10px; border-radius: 50%; background: var(--soft-green); color: var(--green); font-weight: 800; font-size: 14px; display: grid; place-items: center; }
+    .item-num::before { counter-increment: item; content: counter(item); }
+    .item-row .remove { flex: none; margin-top: 6px; min-width: 40px; min-height: 40px; font-size: 20px; line-height: 1; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
+    .chip { min-height: 36px; padding: 6px 12px; border-radius: 99px; font-size: 14px; background: var(--bg); border: 1px solid var(--line); }
+    ul.items-given { margin: 4px 0 0; padding-left: 18px; font-size: 14px; }
+    ul.items-given li { padding: 1px 0; border: 0; display: list-item; }
+    ul.items-given .muted { font-size: 13px; }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -123,7 +136,7 @@
 // Helpers
 // ---------------------------------------------------------------------------
 const app = document.getElementById('app');
-const state = { pin: '', staff: '', tab: 'find', code: '' };
+const state = { mode: 'give', pin: '', staff: '', tab: 'find', code: '' };
 
 const store = {
   get(k) { try { return localStorage.getItem('swapshop.' + k) || ''; } catch (e) { return ''; } },
@@ -153,6 +166,19 @@ async function call(fn, ...args) {
   try { data = await res.json(); } catch (e) { throw new Error('The ticket server sent an unexpected reply. Try again.'); }
   if (!data.ok) throw new Error(data.error || 'Something went wrong.');
   return data.result;
+}
+
+/** Donations send item lists, which older copies of Code.gs would silently ignore. */
+const NEEDS_API_VERSION = 2;
+let serverCheck = null;
+function ensureServerUpToDate() {
+  serverCheck = serverCheck || call('getConfig').then((cfg) => {
+    if (!(cfg.apiVersion >= NEEDS_API_VERSION)) {
+      throw new Error('The ticket server (Code.gs) is out of date. Ask an organizer to update it — see the README.');
+    }
+  });
+  serverCheck.catch(() => { serverCheck = null; });
+  return serverCheck;
 }
 
 function errMsg(e) { return (e && e.message ? e.message : String(e)).replace(/^Exception:\s*/, ''); }
@@ -311,9 +337,13 @@ function historyCard(history, staffMode, onUndo) {
     const undoBtn = staffMode && !e.undone && e.type !== 'UNDO'
       ? h('button', { class: 'small', onclick: (ev) => onUndo(e, ev.currentTarget) }, 'Undo')
       : null;
+    const items = e.items || [];
     return h('li', { class: e.undone ? 'struck' : '' },
       h('div', { class: 'grow' },
-        h('div', { class: 'title' }, e.note || e.type),
+        h('div', { class: 'title' }, items.length ? 'Donated ' + plural(items.length, 'item') : (e.note || e.type)),
+        items.length ? h('ul', { class: 'items-given' }, items.map((it) =>
+          h('li', {}, it.name, it.description ? h('span', { class: 'muted' }, ' — ' + it.description) : null)
+        )) : null,
         h('div', { class: 'muted' }, fmtTime(e.ts), staffMode && e.staff ? ' · ' + e.staff : '', e.undone ? ' · undone' : '')
       ),
       changeCell(e),
@@ -417,25 +447,84 @@ function stepper(initial, min) {
   return { el, get: () => n, set, onChange: (fn) => listeners.push(fn) };
 }
 
+const ITEM_CHIPS = ['Shirt', 'Pants', 'Jacket', 'Sweater', 'Dress', 'Shoes', 'Bag', 'Jewelry', 'Accessory'];
+
+/** List of donated items: a name and optional description each. 1 item = 1 ticket. */
+function itemEditor() {
+  const list = h('div', { class: 'items' });
+  const listeners = [];
+  const rows = () => [...list.children].map((row) => ({
+    name: row.querySelector('.item-name').value.trim(),
+    description: row.querySelector('.item-desc').value.trim(),
+  }));
+  const changed = () => { const n = api.count(); listeners.forEach((fn) => fn(n)); };
+
+  function addRow(name) {
+    const nameIn = h('input', { class: 'item-name', placeholder: 'Item (e.g. Jacket)', autocomplete: 'off', maxlength: '60', 'aria-label': 'Item name' });
+    const descIn = h('input', { class: 'item-desc', placeholder: 'Description (optional)', autocomplete: 'off', maxlength: '200', 'aria-label': 'Item description' });
+    nameIn.value = name || '';
+    const row = h('div', { class: 'item-row' },
+      h('span', { class: 'item-num', 'aria-hidden': 'true' }),
+      h('div', { class: 'grow' }, nameIn, descIn),
+      h('button', { class: 'small remove', 'aria-label': 'Remove item', onclick: () => {
+        row.remove();
+        if (!list.children.length) addRow();
+        changed();
+      } }, '×')
+    );
+    nameIn.addEventListener('input', changed);
+    descIn.addEventListener('input', changed);
+    list.append(row);
+    changed();
+    return nameIn;
+  }
+
+  const quickAdd = (label) => {
+    const empty = [...list.querySelectorAll('.item-name')].find((i) => !i.value.trim());
+    if (empty) empty.value = label;
+    else addRow(label);
+    changed();
+  };
+
+  const api = {
+    el: h('div', {},
+      h('div', { class: 'chips' }, ITEM_CHIPS.map((c) => h('button', { class: 'chip', type: 'button', onclick: () => quickAdd(c) }, '+ ' + c))),
+      list,
+      h('button', { class: 'full', type: 'button', id: 'addItemBtn', onclick: () => addRow().focus() }, '+ Add another item')
+    ),
+    /** Filled-in items; throws if a row has a description but no name. */
+    items() {
+      const filled = rows().filter((r) => r.name || r.description);
+      if (filled.some((r) => !r.name)) throw new Error('Every item needs a name (e.g. "Jacket").');
+      return filled;
+    },
+    count: () => rows().filter((r) => r.name).length,
+    onChange: (fn) => listeners.push(fn),
+  };
+  addRow();
+  return api;
+}
+
 function newDonorTab(body) {
   const name = h('input', { id: 'newName', placeholder: 'First name + last initial', autocomplete: 'off' });
   const contact = h('input', { id: 'newContact', placeholder: 'Phone or email (optional, helps find them later)', autocomplete: 'off', inputmode: 'email' });
-  const count = stepper(1, 0);
-  const btn = h('button', { class: 'go full' });
+  const items = itemEditor();
+  const btn = h('button', { class: 'go full', id: 'registerBtn' });
   const label = (n) => { btn.textContent = n ? 'Register + give ' + plural(n, 'ticket') : 'Register (no tickets yet)'; };
-  label(count.get());
-  count.onChange(label);
+  label(items.count());
+  items.onChange(label);
   btn.addEventListener('click', () => busy(btn, async () => {
-    const m = await call('createMember', state.pin, state.staff, name.value, contact.value, count.get(), '');
+    await ensureServerUpToDate();
+    const m = await call('createMember', state.pin, state.staff, name.value, contact.value, items.items(), '');
     toast(m.matchedExisting ? 'Already registered — added to ' + m.name : 'Registered ' + m.name);
     go({ m: m.code, fresh: '1' });
-  }));
+  }).finally(() => label(items.count())));
   body.append(
     h('div', { class: 'card' },
       h('h2', {}, 'New donor'),
       h('label', { for: 'newName' }, 'Name'), name,
       h('label', { for: 'newContact' }, 'Phone or email'), contact,
-      h('label', {}, 'Items donated (1 item = 1 ticket)'), count.el,
+      h('label', {}, 'Items donated (1 item = 1 ticket)'), items.el,
       btn
     )
   );
@@ -484,24 +573,56 @@ async function showStaffMember(code, flash) {
 }
 
 function renderStaffMember(m, flash) {
+  // Donation: list the items dropped off (1 item = 1 ticket).
+  const items = itemEditor();
+  const addBtn = h('button', { class: 'go full', id: 'addBtn' });
+  const addLabel = (n) => {
+    addBtn.textContent = n ? '+ Give ' + plural(n, 'ticket') : 'List the items to give tickets';
+    addBtn.disabled = !n;
+  };
+  addLabel(items.count());
+  items.onChange(addLabel);
+  addBtn.addEventListener('click', () => busy(addBtn, async () => {
+    const given = items.items();
+    await ensureServerUpToDate();
+    const updated = await call('addTickets', state.pin, state.staff, m.code, given, '');
+    renderStaffMember(updated, { ok: 'Gave ' + plural(given.length, 'ticket') + '. New balance: ' + updated.balance });
+  }).finally(() => addLabel(items.count())));
+
+  // Shop: spend tickets on goods.
   const count = stepper(1, 1);
-  const note = h('input', { id: 'note', placeholder: 'Note (optional)', autocomplete: 'off' });
-  const addBtn = h('button', { class: 'go', id: 'addBtn' });
-  const redeemBtn = h('button', { class: 'primary', id: 'redeemBtn' });
-  const labels = (n) => {
-    addBtn.textContent = '+ Give ' + n;
-    redeemBtn.textContent = '− Spend ' + n;
+  const note = h('input', { id: 'note', placeholder: 'What they took (optional)', autocomplete: 'off' });
+  const redeemBtn = h('button', { class: 'primary full', id: 'redeemBtn' });
+  const spendLabel = (n) => {
+    redeemBtn.textContent = '− Spend ' + plural(n, 'ticket');
     redeemBtn.disabled = n > m.balance;
   };
-  labels(count.get());
-  count.onChange(labels);
+  spendLabel(count.get());
+  count.onChange(spendLabel);
+  redeemBtn.addEventListener('click', () => busy(redeemBtn, async () => {
+    const n = count.get();
+    const updated = await call('redeemTickets', state.pin, state.staff, m.code, n, note.value);
+    renderStaffMember(updated, { ok: 'Spent ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
+  }).finally(() => spendLabel(count.get())));
 
-  const act = (btn, fn, verb) => busy(btn, async () => {
-    const updated = await call(fn, state.pin, state.staff, m.code, count.get(), note.value);
-    renderStaffMember(updated, { ok: verb + ' ' + plural(count.get(), 'ticket') + '. New balance: ' + updated.balance });
-  }).finally(() => labels(count.get()));
-  addBtn.addEventListener('click', () => act(addBtn, 'addTickets', 'Gave'));
-  redeemBtn.addEventListener('click', () => act(redeemBtn, 'redeemTickets', 'Spent'));
+  const givePanel = h('div', {},
+    h('p', { class: 'muted' }, 'List each item dropped off. Tap a button to add it fast, then add a description if you like.'),
+    items.el, addBtn);
+  const shopPanel = h('div', {},
+    h('p', { class: 'muted' }, 'How many items are they taking?'),
+    count.el, note, redeemBtn);
+  const modeBtns = {};
+  const setMode = (mode) => {
+    state.mode = mode;
+    givePanel.classList.toggle('hidden', mode !== 'give');
+    shopPanel.classList.toggle('hidden', mode !== 'shop');
+    for (const [k, b] of Object.entries(modeBtns)) b.className = k === mode ? 'on' : '';
+  };
+  const modeBar = h('div', { class: 'tabs' },
+    (modeBtns.give = h('button', { id: 'modeGive', onclick: () => setMode('give') }, 'Donation')),
+    (modeBtns.shop = h('button', { id: 'modeShop', onclick: () => setMode('shop') }, 'Shop'))
+  );
+  setMode(state.mode);
 
   const onUndo = (entry, btn) => {
     if (btn.dataset.armed !== '1') {
@@ -533,12 +654,9 @@ function renderStaffMember(m, flash) {
       h('div', { class: 'balance' },
         h('div', { class: 'num', id: 'balance' }, m.balance),
         h('div', { class: 'lbl' }, m.balance === 1 ? 'ticket' : 'tickets')
-      ),
-      count.el,
-      h('div', { class: 'row' }, addBtn, redeemBtn),
-      note,
-      h('p', { class: 'muted' }, 'Give = donations dropped off. Spend = goods taken at the shop.')
+      )
     ),
+    h('div', { class: 'card' }, modeBar, givePanel, shopPanel),
     qrCard,
     qrToggle,
     historyCard(m.history, true, onUndo),
