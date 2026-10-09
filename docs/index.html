@@ -69,6 +69,9 @@
     .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
     .tabs button { flex: 1; background: var(--card); border: 1px solid var(--line); }
     .tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+    .tabs.sub { margin-bottom: 8px; }
+    .tabs.sub button { min-height: 0; padding: 7px 10px; font-size: 14px; }
+    .tabs.sub button.on { background: var(--soft-green); color: var(--green); border-color: var(--green); }
     .balance { text-align: center; padding: 8px 0; }
     .balance .num { font-size: 76px; font-weight: 800; line-height: 1; color: var(--red); font-variant-numeric: tabular-nums; }
     .balance .lbl { color: var(--muted); }
@@ -505,17 +508,61 @@ function itemEditor() {
   return api;
 }
 
+/**
+ * Donation form with two styles: "Quick count" (just how many items, the default)
+ * or "List items" (a name + optional description per item). Each phone remembers
+ * the last style used.
+ */
+function donationInput(min) {
+  const quick = stepper(Math.max(min, 1), min);
+  const list = itemEditor();
+  const listeners = [];
+  const panels = {
+    quick: h('div', {}, h('p', { class: 'muted center' }, 'How many items did they drop off?'), quick.el),
+    list: h('div', {}, h('p', { class: 'muted' }, 'Tap a button to add each item fast. Descriptions are optional.'), list.el),
+  };
+  const btns = {};
+  let style;
+  const api = {
+    count: () => (style === 'list' ? list.count() : quick.get()),
+    /** What the server expects: a plain count, or the list of items. */
+    value: () => (style === 'list' ? list.items() : quick.get()),
+    onChange: (fn) => listeners.push(fn),
+  };
+  const changed = () => { const n = api.count(); listeners.forEach((fn) => fn(n)); };
+  const setStyle = (s) => {
+    style = s === 'list' ? 'list' : 'quick';
+    store.set('donationStyle', style);
+    for (const k of Object.keys(panels)) {
+      panels[k].classList.toggle('hidden', k !== style);
+      btns[k].className = k === style ? 'on' : '';
+    }
+    changed();
+  };
+  api.el = h('div', {},
+    h('div', { class: 'tabs sub' },
+      (btns.quick = h('button', { id: 'styleQuick', type: 'button', onclick: () => setStyle('quick') }, 'Quick count')),
+      (btns.list = h('button', { id: 'styleList', type: 'button', onclick: () => setStyle('list') }, 'List items'))
+    ),
+    panels.quick, panels.list
+  );
+  quick.onChange(changed);
+  list.onChange(changed);
+  setStyle(store.get('donationStyle'));
+  return api;
+}
+
 function newDonorTab(body) {
   const name = h('input', { id: 'newName', placeholder: 'First name + last initial', autocomplete: 'off' });
   const contact = h('input', { id: 'newContact', placeholder: 'Phone or email (optional, helps find them later)', autocomplete: 'off', inputmode: 'email' });
-  const items = itemEditor();
+  const items = donationInput(0);
   const btn = h('button', { class: 'go full', id: 'registerBtn' });
   const label = (n) => { btn.textContent = n ? 'Register + give ' + plural(n, 'ticket') : 'Register (no tickets yet)'; };
   label(items.count());
   items.onChange(label);
   btn.addEventListener('click', () => busy(btn, async () => {
     await ensureServerUpToDate();
-    const m = await call('createMember', state.pin, state.staff, name.value, contact.value, items.items(), '');
+    const m = await call('createMember', state.pin, state.staff, name.value, contact.value, items.value(), '');
     toast(m.matchedExisting ? 'Already registered — added to ' + m.name : 'Registered ' + m.name);
     go({ m: m.code, fresh: '1' });
   }).finally(() => label(items.count())));
@@ -573,8 +620,8 @@ async function showStaffMember(code, flash) {
 }
 
 function renderStaffMember(m, flash) {
-  // Donation: list the items dropped off (1 item = 1 ticket).
-  const items = itemEditor();
+  // Donation: count or list the items dropped off (1 item = 1 ticket).
+  const items = donationInput(1);
   const addBtn = h('button', { class: 'go full', id: 'addBtn' });
   const addLabel = (n) => {
     addBtn.textContent = n ? '+ Give ' + plural(n, 'ticket') : 'List the items to give tickets';
@@ -583,10 +630,11 @@ function renderStaffMember(m, flash) {
   addLabel(items.count());
   items.onChange(addLabel);
   addBtn.addEventListener('click', () => busy(addBtn, async () => {
-    const given = items.items();
+    const given = items.value();
+    const n = Array.isArray(given) ? given.length : given;
     await ensureServerUpToDate();
     const updated = await call('addTickets', state.pin, state.staff, m.code, given, '');
-    renderStaffMember(updated, { ok: 'Gave ' + plural(given.length, 'ticket') + '. New balance: ' + updated.balance });
+    renderStaffMember(updated, { ok: 'Gave ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
   }).finally(() => addLabel(items.count())));
 
   // Shop: spend tickets on goods.
@@ -605,9 +653,7 @@ function renderStaffMember(m, flash) {
     renderStaffMember(updated, { ok: 'Spent ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
   }).finally(() => spendLabel(count.get())));
 
-  const givePanel = h('div', {},
-    h('p', { class: 'muted' }, 'List each item dropped off. Tap a button to add it fast, then add a description if you like.'),
-    items.el, addBtn);
+  const givePanel = h('div', {}, items.el, addBtn);
   const shopPanel = h('div', {},
     h('p', { class: 'muted' }, 'How many items are they taking?'),
     count.el, note, redeemBtn);

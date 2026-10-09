@@ -19,13 +19,17 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
 
 **Donation drop-off (Oct 5–22, during tabling or by appointment)**
 1. Volunteer opens the app → **New donor** → types a name (and phone/email if they'll give it)
-   → lists each item dropped off → **Register + give N tickets**. Each item gets a name (tap a
-   quick button like **+ Jacket**, or type one) and an optional description ("blue denim, size M").
-   The ticket count is the number of items listed.
+   → sets how many items they dropped off → **Register + give N tickets**.
+   - **Quick count** (the default) is just a number. Nothing to describe.
+   - **List items** records each item instead: a name (tap a quick button like **+ Jacket**, or
+     type one) and an optional description ("blue denim, size M"). The ticket count is the
+     number of items listed, and they show up in the **Items** tab.
+
+   Each phone remembers which of the two you used last.
 2. A QR code appears. The donor scans it with their phone camera and bookmarks or screenshots
    the page. Or they can just write down the 5-letter code.
 3. Someone who comes back with more donations: **Find** them by name, phone, or code
-   → **Donation** → list the items → **+ Give**. If you register someone again with the same phone or email, the app spots that
+   → **Donation** → count or list the items → **+ Give**. If you register someone again with the same phone or email, the app spots that
    and adds the tickets to their existing account.
 
 **Shop day (Oct 23, 6–8pm, Pavilion Lawn)**
@@ -40,8 +44,8 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
 **Lost code?** Volunteers can search by name or phone and show the QR again.
 
 **The spreadsheet tabs:**
-- **Items**: one row per donated item: when, who donated it, item name, description, and the
-  volunteer who logged it. Sort or filter it like any sheet (e.g. to count jackets). If a donation
+- **Items**: one row per item logged with **List items**: when, who donated it, item name,
+  description, and the volunteer who logged it. Quick-count donations only appear in the Ledger. Sort or filter it like any sheet (e.g. to count jackets). If a donation
   is undone, its items stay but the **Status** column says `Undone`.
 - **Ledger**: every ticket change (donations, spends, undos). Balances are calculated from this.
 - **Members**: everyone registered, with their code and contact.

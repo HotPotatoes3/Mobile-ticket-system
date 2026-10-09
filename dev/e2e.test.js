@@ -45,6 +45,9 @@ async function main() {
     await staff.getByRole('button', { name: 'New donor' }).click();
     await staff.fill('#newName', 'Ana R');
     await staff.fill('#newContact', '(209) 555-0101');
+    assert(await staff.locator('#styleQuick.on').count(), 'Quick count should be the default');
+    assert.strictEqual(await staff.locator('#registerBtn').innerText(), 'Register + give 1 ticket');
+    await staff.locator('#styleList').click();                               // phone remembers this
     assert.strictEqual(await staff.locator('#registerBtn').innerText(), 'Register (no tickets yet)');
     await staff.getByRole('button', { name: '+ Jacket' }).click();          // fills the empty first row
     await staff.locator('.item-desc').nth(0).fill('Blue denim, size M');
@@ -187,6 +190,30 @@ async function main() {
     assert.match(await err('constructor'), /Unknown request/);
 
     assert.strictEqual((await rpc(holder, 'getConfig')).result.apiVersion, 2);
+
+    // Quick count: just a number of tickets, no item details. The phone remembers the choice.
+    await staff.goto(BASE + '?m=' + code);
+    await staff.locator('#modeGive').click();
+    assert(await staff.locator('#styleList.on').count(), 'List items choice not remembered');
+    await staff.locator('#styleQuick').click();
+    await staff.getByRole('button', { name: 'More' }).click();
+    await staff.getByRole('button', { name: 'More' }).click();
+    await shot(staff, '2c-quick-count');
+    await staff.getByRole('button', { name: '+ Give 3 tickets' }).click();
+    await staff.locator('#flash', { hasText: 'Gave 3 tickets. New balance: 7' }).waitFor();
+    await staff.reload();
+    await staff.locator('#modeGive').click();
+    assert(await staff.locator('#styleQuick.on').count(), 'Quick count choice not remembered');
+    await staff.getByRole('button', { name: '← Back to search' }).click();
+    await staff.getByRole('button', { name: 'New donor' }).click();
+    await staff.fill('#newName', 'Bo T');
+    await staff.getByRole('button', { name: 'Fewer' }).click();
+    await staff.getByRole('button', { name: 'Register (no tickets yet)' }).click();
+    await staff.getByText('Give them their ticket').waitFor();
+    assert.strictEqual(await balance(staff), 0);
+    const after = await staff.evaluate(() => fetch('/__sheets').then((r) => r.json()));
+    assert.strictEqual(after.Items.length - 1, 7, 'quick count must not add Items rows');
+    assert.match(after.Ledger[after.Ledger.length - 1][5], /^Donated 3 item\(s\)$/);
 
     console.log('All e2e checks passed. Ticket code used:', code);
   } finally {
