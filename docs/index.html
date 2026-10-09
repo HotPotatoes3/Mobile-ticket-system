@@ -131,6 +131,7 @@
     .stats.three .stat b { font-size: 24px; }
     .chg.paper { white-space: nowrap; min-width: 64px; }
     .paper-line { text-align: center; font-weight: 600; color: var(--green); margin-top: 4px; }
+    #lostPanel p { text-align: left; }
     .lookup { display: flex; gap: 8px; }
     .lookup input { flex: 1; min-width: 0; }
     #keepHandy .full { margin-top: 0; }
@@ -188,7 +189,8 @@ async function call(fn, ...args) {
 /**
  * Older copies of Code.gs would silently drop newer data: item lists need
  * version 2, separate emails and editing contact info need version 3, and
- * paper tickets need version 4 (an older server would give phone tickets instead).
+ * paper tickets need version 4 (an older server would give phone tickets instead),
+ * and moving lost paper tickets to a phone needs version 5.
  */
 let serverConfig = null;
 async function ensureServerUpToDate(minVersion = 2) {
@@ -391,6 +393,7 @@ async function showWallet(code) {
           h('div', { class: 'lbl' }, w.balance === 1 ? 'ticket' : 'tickets')
         ),
         paperLine(w.paper, 'given to you — bring them to the shop'),
+        w.paper > 0 ? h('p', { class: 'muted center' }, 'Lost them? A volunteer can move them onto this page.') : null,
         qrBox(w.code),
         h('div', { class: 'codebig' }, w.code),
         h('p', { class: 'muted center' }, 'Show this screen at the Swap Shop. Bookmark or screenshot it so you don\'t lose it!')
@@ -577,12 +580,12 @@ function findTab(body) {
   input.focus();
 }
 
-function stepper(initial, min) {
+function stepper(initial, min, max = CONFIG.maxPerEntry) {
   let n = initial;
   const num = h('span', { class: 'n' }, n);
   const listeners = [];
   const set = (v) => {
-    n = Math.max(min, Math.min(CONFIG.maxPerEntry, v));
+    n = Math.max(min, Math.min(max, v));
     num.textContent = n;
     listeners.forEach((fn) => fn(n));
   };
@@ -770,7 +773,7 @@ function newDonorTab(body) {
     const m = await call('createMember', state.pin, state.staff, name.value, phone, items.value(), '', email, paperValue);
     toast(m.matchedExisting ? 'Already registered — added to ' + m.name : 'Registered ' + m.name);
     if (paperValue) state.flash = paperFlash(m, n);
-    go(paperValue ? { m: m.code } : { m: m.code, fresh: '1' });
+    go({ m: m.code, fresh: '1' });
   }).finally(label));
   body.append(
     h('div', { class: 'card' },
@@ -812,9 +815,12 @@ async function statsTab(body) {
 
 function paperStats(s) {
   const stat = (n, l, id) => h('div', { class: 'stat', id }, h('b', {}, n), h('span', { class: 'muted' }, l));
-  return h('div', { class: 'stats three' },
-    stat(s.paperGiven, 'handed out', 'paperGiven'), stat(s.paperCollected, 'collected', 'paperCollected'),
-    stat(s.paperOut, 'still out there', 'paperOut'));
+  return [
+    h('div', { class: 'stats three' },
+      stat(s.paperGiven, 'handed out', 'paperGiven'), stat(s.paperCollected, 'collected', 'paperCollected'),
+      stat(s.paperOut, 'still out there', 'paperOut')),
+    s.paperLost ? h('p', { class: 'muted', id: 'paperLost' }, plural(s.paperLost, 'paper ticket') + ' reported lost and moved to phones (not counted as still out there).') : null,
+  ];
 }
 
 /** One line of recent activity. Paper collected at checkout has no person to open. */
@@ -858,10 +864,13 @@ async function paperTab(body, flash) {
   const check = () => busy(checkBtn, async () => {
     const r = await call('checkPaperTicket', state.pin, num.value);
     const e = r.entry;
-    result.replaceChildren(r.found
+    fill(result, r.found
       ? h('div', { class: 'notice ok clickable', onclick: () => go({ m: e.code }) },
           '✓ Given to ', h('b', {}, e.name), ' (' + e.code + ') · ' + e.serials + ' · ' + fmtTime(e.ts) + (e.staff ? ' by ' + e.staff : ''))
-      : h('div', { class: 'notice err' },
+      : null,
+      r.found && r.lost ? h('div', { class: 'notice err', id: 'lostWarning' }, '⚠ ' + e.name + ' reported ' +
+          plural(r.lost, 'paper ticket') + ' lost, and they were moved to their phone. Check with them before accepting this one.') : null,
+      r.found ? null : h('div', { class: 'notice err' },
           'Not in any recorded handout. Only handouts where the first ticket number was entered can be looked up.'));
   });
   checkBtn.addEventListener('click', check);
@@ -896,6 +905,32 @@ async function paperTab(body, flash) {
         : h('p', { class: 'muted' }, 'No paper tickets yet.')
     )
   );
+}
+
+/**
+ * "Lost their paper tickets?" Moves unspent paper tickets onto their phone, so they can
+ * still shop. Only for tickets they haven't spent: paper collected at checkout isn't
+ * tied to a person, so the volunteer has to ask.
+ */
+function lostPaperPanel(m) {
+  if (!(m.paper > 0)) return null;
+  const count = stepper(m.paper, 1, m.paper);
+  const btn = h('button', { class: 'go full', id: 'lostBtn' });
+  const label = (n) => { btn.textContent = 'Move ' + plural(n, 'paper ticket') + ' to their phone'; };
+  label(count.get());
+  count.onChange(label);
+  btn.addEventListener('click', () => busy(btn, async () => {
+    const n = count.get();
+    await ensureServerUpToDate(5);
+    const updated = await call('replaceLostPaper', state.pin, state.staff, m.code, n);
+    renderStaffMember(updated, { ok: 'Moved ' + plural(n, 'paper ticket') + ' to their phone. New balance: ' + updated.balance });
+  }));
+  const panel = h('div', { class: 'hidden', id: 'lostPanel' },
+    h('p', { class: 'muted' }, 'Lost or forgot their paper tickets? Ask how many they haven\'t spent yet, and move those onto their phone. If anyone later shows up with those ticket numbers, the lookup will warn that they were reported lost.'),
+    count.el, btn);
+  return h('div', { class: 'center' },
+    h('button', { class: 'link small', id: 'lostPaperBtn', onclick: () => panel.classList.toggle('hidden') }, 'Lost their paper tickets?'),
+    panel);
 }
 
 async function showStaffMember(code, flash) {
@@ -994,9 +1029,11 @@ function renderStaffMember(m, flash) {
     h('button', { class: 'link small', onclick: openContact }, 'Add one'),
     ' so we can text them a reminder before the shop.') : null;
 
-  const qrCard = h('div', { class: 'card center' },
+  const qrCard = h('div', { class: 'card center', id: 'qrCard' },
     h('h2', {}, 'Give them their ticket'),
-    h('p', { class: 'muted' }, 'Have them scan this with their phone camera and bookmark the page — or write down the code.'),
+    h('p', { class: 'muted' }, m.paper > 0
+      ? 'Even with paper tickets, have them scan this and bookmark the page. If they lose the paper, a volunteer can move the tickets onto their phone.'
+      : 'Have them scan this with their phone camera and bookmark the page — or write down the code.'),
     qrBox(m.code),
     h('div', { class: 'codebig' }, m.code)
   );
@@ -1013,6 +1050,7 @@ function renderStaffMember(m, flash) {
         h('div', { class: 'lbl' }, m.balance === 1 ? 'ticket' : 'tickets')
       ),
       paperLine(m.paper, 'handed out'),
+      lostPaperPanel(m),
       missingPhone,
       contactForm
     ),

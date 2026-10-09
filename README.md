@@ -46,12 +46,18 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
   tickets never change the donor's phone balance; their page shows "+ 3 paper tickets" instead.
   It always starts on **On their phone**, so paper is never given by accident. If the ticket
   numbers overlap ones already handed out, the app refuses and says who has them (usually a typo).
+  The QR code still pops up for paper donors: have them scan and bookmark it anyway.
+- **Lost or forgotten paper:** on the donor's page, tap **Lost their paper tickets?**, set how many
+  they haven't spent yet, and **Move N paper tickets to their phone**. They can then shop with the
+  QR like anyone else. Looking up one of their ticket numbers afterwards warns that they reported
+  paper lost, so a found ticket isn't spent twice. (The app can't tell which paper tickets were
+  already spent, since collecting paper isn't tied to a person, so ask.)
 - **At checkout:** open the **Paper** tab → count the paper tickets they hand you → **− Collect N
   paper tickets** → drop them in a box. Someone paying with both? Spend their phone tickets on
   their page as usual, and collect the paper ones in the Paper tab (there's a link on the Shop
   screen).
 - **Keeping track:** the Paper tab (and Stats) shows paper tickets **handed out**, **collected**,
-  and **still out there**, plus recent paper activity with Undo. **Look up a ticket number** tells
+  and **still out there** (lost ones moved to phones are listed separately), plus recent paper activity with Undo. **Look up a ticket number** tells
   you who a ticket was given to, if the first ticket number was entered when it was handed out.
 
 **Shop day (Oct 23, 6–8pm, Pavilion Lawn)**

@@ -11,7 +11,8 @@
  *
  * Paper tickets (from a raffle roll) are tracked in the Ledger's "Paper" column:
  * +N when handed to a donor (with the ticket numbers, if entered), -N when
- * collected at checkout. They never change anyone's phone balance.
+ * collected at checkout. They never change anyone's phone balance, except
+ * when a donor loses them: replaceLostPaper moves them onto their phone.
  *
  * The ticket page itself is hosted on GitHub Pages (docs/) and calls doPost
  * below. Staff actions require the STAFF_PIN script property (see README).
@@ -19,7 +20,7 @@
 
 var EVENT_NAME = 'UCM YDSA Swap Shop';
 var PAGE_URL = 'https://hotpotatoes3.github.io/Mobile-ticket-system/'; // the GitHub Pages site
-var API_VERSION = 4; // 2 = itemized donations, 3 = phone required + email, 4 = paper tickets
+var API_VERSION = 5; // 2 = itemized donations, 3 = phone required + email, 4 = paper tickets, 5 = lost paper
 var MAX_TICKETS_PER_ENTRY = 50; // guards against fat-finger typos
 var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var CODE_LENGTH = 5;
@@ -54,6 +55,7 @@ var API = {
   undoEntry: undoEntry,
   getStats: getStats,
   collectPaper: collectPaper,
+  replaceLostPaper: replaceLostPaper,
   checkPaperTicket: checkPaperTicket
 };
 
@@ -271,6 +273,9 @@ function undoEntry(pin, staff, entryId) {
     if (member && (data.balances[member.code] || 0) + reversal < 0) {
       throw new Error('Undoing this would make the balance negative (tickets were already spent).');
     }
+    if (member && (data.paperByCode[member.code] || 0) - entry.paper < 0) {
+      throw new Error('Some of these paper tickets were reported lost. Undo that entry first.');
+    }
     appendEntry_(member, reversal, 'UNDO', 'Undo: ' + entry.note, staff, entryId, -entry.paper, '');
     if (entry.items.length) markItemsUndone_(entryId);
     return member ? getMemberForStaff(pin, member.code) : getStats(pin);
@@ -280,13 +285,14 @@ function undoEntry(pin, staff, entryId) {
 function getStats(pin) {
   checkPin_(pin);
   var data = loadData_();
-  var issued = 0, redeemed = 0, paperGiven = 0, paperCollected = 0;
+  var issued = 0, redeemed = 0, paperGiven = 0, paperCollected = 0, paperLost = 0;
   // An undone entry and its UNDO cancel out, so both are left out of the totals.
   data.entries.forEach(function (e) {
     if (e.undone || e.type === 'UNDO') return;
     if (e.change > 0) issued += e.change;
     else redeemed -= e.change;
     if (e.paper > 0) paperGiven += e.paper;
+    else if (e.type === 'PAPER_LOST') paperLost -= e.paper;
     else paperCollected -= e.paper;
   });
   return {
@@ -296,7 +302,8 @@ function getStats(pin) {
     outstanding: issued - redeemed,
     paperGiven: paperGiven,
     paperCollected: paperCollected,
-    paperOut: paperGiven - paperCollected,
+    paperLost: paperLost,
+    paperOut: paperGiven - paperCollected - paperLost,
     recent: data.entries.slice(-15).reverse().map(staffEntry_),
     paperRecent: data.entries.filter(function (e) { return e.paper; }).slice(-15).reverse().map(staffEntry_)
   };
@@ -314,6 +321,27 @@ function collectPaper(pin, staff, count, note) {
   });
 }
 
+/**
+ * A donor lost (or forgot) paper tickets they haven't spent: move them onto
+ * their phone. Their paper ticket numbers then show as reported lost.
+ */
+function replaceLostPaper(pin, staff, code, count) {
+  checkPin_(pin);
+  validateCount_(count);
+  return withLock_(function () {
+    var data = loadData_();
+    var member = requireMember_(data, code);
+    var n = Number(count);
+    var held = data.paperByCode[member.code] || 0;
+    if (n > held) {
+      throw new Error(member.name + ' only has ' + held + ' paper ticket' + (held === 1 ? '' : 's') + ' on record.');
+    }
+    appendEntry_(member, n, 'PAPER_LOST', 'Lost ' + n + ' paper ticket' + (n === 1 ? '' : 's') + ', moved to phone',
+      staff, '', -n, '');
+    return getMemberForStaff(pin, member.code);
+  });
+}
+
 /** Who was a paper ticket number handed to? Only handouts with ticket numbers noted can be found. */
 function checkPaperTicket(pin, number) {
   checkPin_(pin);
@@ -322,7 +350,12 @@ function checkPaperTicket(pin, number) {
   for (var i = data.entries.length - 1; i >= 0; i--) {
     var e = data.entries[i];
     if (e.range && !e.undone && e.type !== 'UNDO' && n >= e.range[0] && n <= e.range[1]) {
-      return { found: true, entry: staffEntry_(e) };
+      // How many paper tickets this person reported lost (we can't tell which numbers).
+      var lost = 0;
+      data.entries.forEach(function (x) {
+        if (x.code === e.code && x.type === 'PAPER_LOST' && !x.undone) lost -= x.paper;
+      });
+      return { found: true, entry: staffEntry_(e), lost: lost };
     }
   }
   return { found: false };
