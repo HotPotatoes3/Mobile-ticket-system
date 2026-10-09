@@ -27,7 +27,10 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
 
    Each phone remembers which of the two you used last.
 2. A QR code appears. The donor scans it with their phone camera and bookmarks or screenshots
-   the page. Or they can just write down the 5-letter code.
+   the page. Or they can just write down the 5-letter code. At the bottom of their ticket page,
+   **Save ticket to Photos** saves a picture with their name, QR code and code, and there's a tip
+   for adding the page to their Home Screen. (Real Apple Wallet passes would need a paid Apple
+   Developer account, so the app doesn't make them.)
 3. Someone who comes back with more donations: **Find** them by name, phone, or code
    → **Donation** → count or list the items → **+ Give**. If you register someone again with the same phone or email, the app spots that
    and adds the tickets to their existing account.
@@ -134,6 +137,6 @@ Files:
 | --- | --- |
 | `apps-script/Code.gs` | Backend: ticket rules, PIN check, Sheet storage, JSON API (`doPost`) |
 | `docs/index.html` | The phone UI (donor ticket page + volunteer tools), served by GitHub Pages |
-| `docs/config.js` | Event name and the Apps Script URL the page talks to |
+| `docs/config.js` | Event name, the date/place printed on saved tickets, and the Apps Script URL the page talks to |
 | `apps-script/appsscript.json` | Apps Script manifest (for use with `clasp`) |
 | `dev/` | Local preview server and end-to-end test |

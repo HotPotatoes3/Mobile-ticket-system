@@ -192,6 +192,35 @@ async function main() {
     assert(await noHScroll(holder), 'wallet scrolls sideways');
     await shot(holder, '5-wallet');
 
+    // "Keep your ticket handy": save a ticket picture (a download where sharing isn't available).
+    assert.match(await holder.locator('#keepHandy').innerText(), /Add to Home screen/);
+    const [download] = await Promise.all([holder.waitForEvent('download'), holder.locator('#saveTicketBtn').click()]);
+    assert.strictEqual(download.suggestedFilename(), `swap-shop-ticket-${code}.png`);
+    const png = require('fs').readFileSync(await download.path());
+    assert.deepStrictEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [1080, 1500], 'ticket picture size');
+    const icon = await holder.evaluate(() => fetch('apple-touch-icon.png').then((r) => [r.status, r.headers.get('content-type')]));
+    assert.deepStrictEqual(icon, [200, 'image/png']);
+
+    // On an iPhone the button opens the share sheet (where "Save Image" puts it in Photos).
+    const iphoneCtx = await browser.newContext({ ...phone,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });
+    if (QR_LIB) await iphoneCtx.route('https://cdnjs.cloudflare.com/**', (r) => r.fulfill({ path: QR_LIB, contentType: 'text/javascript' }));
+    await iphoneCtx.addInitScript(() => {
+      navigator.canShare = (d) => !!(d && d.files);
+      navigator.share = async (d) => { window.shared = d.files.map((f) => [f.name, f.type, f.size > 1000]); };
+    });
+    const iphone = await iphoneCtx.newPage();
+    await iphone.goto(BASE + '?m=' + code);
+    await iphone.locator('#saveTicketBtn', { hasText: 'Save ticket to Photos' }).waitFor();
+    assert.match(await iphone.locator('#keepHandy').innerText(), /tap the Share button .* in Safari, then Add to Home Screen/);
+    await iphone.waitForTimeout(300);                                         // picture is made in the background
+    await iphone.locator('#saveTicketBtn').click();
+    await iphone.waitForFunction(() => window.shared);
+    assert.deepStrictEqual(await iphone.evaluate(() => window.shared), [[`swap-shop-ticket-${code}.png`, 'image/png', true]]);
+    assert(await noHScroll(iphone), 'iPhone wallet scrolls sideways');
+    await shot(iphone, '5b-wallet-iphone');
+    await iphoneCtx.close();
+
     // Bad code shows a friendly error.
     await holder.goto(BASE + '?m=ZZZZZ');
     await holder.getByText('No tickets found').waitFor();

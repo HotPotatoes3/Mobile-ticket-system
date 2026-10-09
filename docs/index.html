@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Swap Shop Tickets</title>
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Swap Shop">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%9F%EF%B8%8F%3C/text%3E%3C/svg%3E">
   <script src="config.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -124,6 +126,11 @@
     ul.items-given li { padding: 1px 0; border: 0; display: list-item; }
     ul.items-given .muted { font-size: 13px; }
     .hidden { display: none !important; }
+    #keepHandy .full { margin-top: 0; }
+    #keepHandy p { margin: 10px 0 0; }
+    .share-icon { display: inline-block; width: 13px; height: 16px; vertical-align: -2px; background: currentColor;
+      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 16' fill='none' stroke='black' stroke-width='1.5'%3E%3Cpath d='M6.5 10V1M3 4.2 6.5 1 10 4.2M4 6.5H1.5v8.75h10V6.5H9'/%3E%3C/svg%3E") center / contain no-repeat;
+              mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 16' fill='none' stroke='black' stroke-width='1.5'%3E%3Cpath d='M6.5 10V1M3 4.2 6.5 1 10 4.2M4 6.5H1.5v8.75h10V6.5H9'/%3E%3C/svg%3E") center / contain no-repeat; }
   </style>
 </head>
 <body>
@@ -355,7 +362,8 @@ async function showWallet(code) {
         h('p', { class: 'muted center' }, 'Show this screen at the Swap Shop. Bookmark or screenshot it so you don\'t lose it!')
       ),
       historyCard(w.history, false),
-      h('button', { class: 'link', onclick: () => showWallet(code) }, 'Refresh')
+      h('button', { class: 'link', onclick: () => showWallet(code) }, 'Refresh'),
+      keepHandyCard(w)
     );
   } catch (e) {
     render(
@@ -363,6 +371,77 @@ async function showWallet(code) {
       h('button', { class: 'full', onclick: () => go({}) }, 'Back')
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Saving the ticket: a picture for Photos, and a home screen shortcut
+// ---------------------------------------------------------------------------
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+
+/** Draws a phone-sized ticket picture (name, QR, code) to save in Photos. */
+function ticketImage(w) {
+  const W = 1080, H = 1500, font = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#d3262b'; g.fillRect(0, 0, W, 230);
+  g.textAlign = 'center';
+  g.fillStyle = '#ffffff';
+  g.font = `800 64px ${font}`;
+  g.fillText(CONFIG.eventName, W / 2, 118, W - 100);
+  if (CONFIG.eventDetails) { g.font = `500 38px ${font}`; g.fillText(CONFIG.eventDetails, W / 2, 182, W - 100); }
+  g.fillStyle = '#1d1b19';
+  g.font = `700 60px ${font}`;
+  g.fillText(w.name, W / 2, 340, W - 100);
+
+  // Same QR as the ticket page, drawn with whole pixels per square so it stays sharp.
+  const tmp = document.createElement('div');
+  const qr = new QRCode(tmp, { text: walletUrl(w.code), width: 256, height: 256, correctLevel: QRCode.CorrectLevel.L });
+  const m = qr._oQRCode;
+  const n = m.getModuleCount(), scale = Math.floor(700 / n), size = n * scale;
+  const x0 = (W - size) / 2, y0 = 400;
+  g.fillStyle = '#000000';
+  for (let r = 0; r < n; r++) for (let col = 0; col < n; col++) if (m.isDark(r, col)) g.fillRect(x0 + col * scale, y0 + r * scale, scale, scale);
+
+  g.fillStyle = '#1d1b19';
+  g.font = `800 110px ${font}`;
+  if ('letterSpacing' in g) g.letterSpacing = '18px';
+  g.fillText(w.code, W / 2 + 9, y0 + size + 140);
+  if ('letterSpacing' in g) g.letterSpacing = '0px';
+  g.fillStyle = '#6d6863';
+  g.font = `500 40px ${font}`;
+  g.fillText('Show this at the Swap Shop.', W / 2, H - 120);
+  g.fillText('Scan it to see how many tickets you have.', W / 2, H - 66);
+  return c;
+}
+
+function keepHandyCard(w) {
+  const name = 'swap-shop-ticket-' + w.code + '.png';
+  let file = null;
+  try { ticketImage(w).toBlob((b) => { if (b) file = new File([b], name, { type: 'image/png' }); }, 'image/png'); } catch (e) { return null; }
+  // Phones get the share sheet ("Save Image" puts it in Photos); computers get a download.
+  const mobile = isIOS || matchMedia('(pointer: coarse)').matches;
+  const save = async () => {
+    if (!file) return toast('One moment — still making your picture.');
+    if (mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); } catch (e) { if (e.name !== 'AbortError') toast(errMsg(e), true); }
+      return;
+    }
+    const a = h('a', { href: URL.createObjectURL(file), download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  };
+  const tip = isStandalone ? null
+    : isIOS ? h('p', { class: 'muted' }, h('b', {}, 'Add to Home Screen: '), 'tap the Share button ', h('span', { class: 'share-icon', 'aria-hidden': 'true' }), ' in Safari, then ', h('b', {}, 'Add to Home Screen'), '. Your tickets open in one tap, always up to date.')
+    : h('p', { class: 'muted' }, h('b', {}, 'Add to Home Screen: '), 'open your browser\'s ⋮ menu and tap ', h('b', {}, 'Add to Home screen'), '. Your tickets open in one tap, always up to date.');
+  return h('div', { class: 'card', id: 'keepHandy' },
+    h('h2', {}, 'Keep your ticket handy'),
+    h('button', { class: 'go full', id: 'saveTicketBtn', onclick: save }, isIOS ? 'Save ticket to Photos' : 'Save ticket picture'),
+    h('p', { class: 'muted' }, 'The picture has your QR code, so it works at the shop even without signal.'),
+    tip
+  );
 }
 
 function historyCard(history, staffMode, onUndo) {

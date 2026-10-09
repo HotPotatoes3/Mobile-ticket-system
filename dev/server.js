@@ -98,7 +98,12 @@ function start() {
     if (url.pathname === '/config.js') {
       // Same settings as docs/config.js, but pointed at this local server.
       res.writeHead(200, { 'content-type': 'text/javascript' });
-      res.end("window.SWAP_SHOP = { eventName: 'UCM YDSA Swap Shop', apiUrl: '/api', maxPerEntry: 50 };");
+      res.end(fs.readFileSync(path.join(DOCS, 'config.js')) + "\nwindow.SWAP_SHOP.apiUrl = '/api';\n");
+      return;
+    }
+    if (url.pathname === '/apple-touch-icon.png') {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(fs.readFileSync(path.join(DOCS, 'apple-touch-icon.png')));
       return;
     }
     if (url.pathname === '/' || url.pathname === '/index.html') {
