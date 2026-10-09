@@ -2,7 +2,7 @@
 //   node dev/e2e.test.js   (uses the globally installed playwright)
 const assert = require('assert');
 const { chromium } = require('playwright');
-const { start, PORT } = require('./server');
+const { start, PORT, createBackend } = require('./server');
 
 const BASE = `http://localhost:${PORT}/`;
 const SHOTS = process.env.SHOTS_DIR;
@@ -44,7 +44,13 @@ async function main() {
     // Register a donor who dropped off 3 items, each with a name and optional description.
     await staff.getByRole('button', { name: 'New donor' }).click();
     await staff.fill('#newName', 'Ana R');
-    await staff.fill('#newContact', '(209) 555-0101');
+    // A phone number is required (for reminder texts).
+    await staff.locator('#registerBtn').click();
+    await staff.locator('#toast', { hasText: 'Please enter a phone number' }).waitFor();
+    await staff.fill('#newPhone', '555-12');
+    await staff.locator('#registerBtn').click();
+    await staff.locator('#toast', { hasText: "doesn't look right" }).waitFor();
+    await staff.fill('#newPhone', '(209) 555-0101');
     assert(await staff.locator('#styleQuick.on').count(), 'Quick count should be the default');
     assert.strictEqual(await staff.locator('#registerBtn').innerText(), 'Register + give 1 ticket');
     await staff.locator('#styleList').click();                               // phone remembers this
@@ -127,21 +133,41 @@ async function main() {
     await staff.getByRole('button', { name: '← Back to search' }).click();
     await staff.getByRole('button', { name: 'New donor' }).click();
     await staff.fill('#newName', 'Ana Rivera');
-    await staff.fill('#newContact', '209-555-0101');
+    await staff.fill('#newPhone', '1 209 555 0101');
+    await staff.fill('#newEmail', 'Ana@Example.com');
     await staff.getByRole('button', { name: '+ Dress' }).click();
     await staff.getByRole('button', { name: 'Register + give 1 ticket' }).click();
     await staff.locator('#toast', { hasText: 'Already registered' }).waitFor();
     assert.strictEqual(await balance(staff), 4);
     assert.strictEqual((await staff.locator('.codebig').innerText()).trim(), code);
+    assert.match(await staff.locator('.card').first().innerText(), /\(209\) 555-0101 · ana@example\.com/);
 
     // Spreadsheet-formula names are stored as plain text.
     await staff.getByRole('button', { name: '← Back to search' }).click();
     await staff.getByRole('button', { name: 'New donor' }).click();
     await staff.fill('#newName', '=1+1');
+    await staff.fill('#newPhone', '+44 20 7946 0958');
     await staff.locator('.item-name').first().fill('Hat');
     await staff.getByRole('button', { name: 'Register + give 1 ticket' }).click();
     await staff.getByText('Give them their ticket').waitFor();
     assert.strictEqual(await staff.locator('.who').innerText(), '=1+1');
+    assert.strictEqual(await staff.locator('#noPhone').count(), 0);
+
+    // Edit contact info: a phone that belongs to someone else is refused.
+    await staff.locator('#editContactBtn').click();
+    await staff.fill('#editPhone', '209.555.0101');
+    await staff.locator('#saveContactBtn').click();
+    await staff.locator('#toast', { hasText: 'already belongs to Ana R' }).waitFor();
+    await staff.fill('#editPhone', '209-555-0199');
+    await staff.locator('#saveContactBtn').click();
+    await staff.locator('#flash', { hasText: 'Contact info saved' }).waitFor();
+    assert.match(await staff.locator('.card').first().innerText(), /\(209\) 555-0199/);
+    const members = (await staff.evaluate(() => fetch('/__sheets').then((r) => r.json()))).Members;
+    assert.deepStrictEqual(members[0], ['Code', 'Name', 'Phone', 'Created', 'Created by', 'Email']);
+    assert.deepStrictEqual(members.slice(1).map((r) => [r[1], r[2], r[5]]), [
+      ['Ana R', '(209) 555-0101', 'ana@example.com'],
+      ['=1+1', '(209) 555-0199', ''],
+    ]);
 
     // Search by phone digits.
     await staff.getByRole('button', { name: '← Back to search' }).click();
@@ -188,8 +214,12 @@ async function main() {
     assert.match(await err('undoEntry', '1234', 'x', undoRow), /can't be undone/);
     assert.match(await err('searchMembers_', '1234'), /Unknown request/);
     assert.match(await err('constructor'), /Unknown request/);
+    assert.match(await err('createMember', '1234', 'x', 'No Phone', '', 1, ''), /enter a phone number/);
+    assert.match(await err('createMember', '1234', 'x', 'Bad', '12345', 1, ''), /doesn't look right/);
+    assert.match(await err('createMember', '1234', 'x', 'Bad', '2095550111', 1, '', 'not-an-email'), /email doesn't look right/);
+    assert.match(await err('updateContact', '1234', 'x', code, '', ''), /enter a phone number/);
 
-    assert.strictEqual((await rpc(holder, 'getConfig')).result.apiVersion, 2);
+    assert.strictEqual((await rpc(holder, 'getConfig')).result.apiVersion, 3);
 
     // Quick count: just a number of tickets, no item details. The phone remembers the choice.
     await staff.goto(BASE + '?m=' + code);
@@ -207,6 +237,7 @@ async function main() {
     await staff.getByRole('button', { name: '← Back to search' }).click();
     await staff.getByRole('button', { name: 'New donor' }).click();
     await staff.fill('#newName', 'Bo T');
+    await staff.fill('#newPhone', '+44 20 7946 0958');
     await staff.getByRole('button', { name: 'Fewer' }).click();
     await staff.getByRole('button', { name: 'Register (no tickets yet)' }).click();
     await staff.getByText('Give them their ticket').waitFor();
@@ -215,6 +246,35 @@ async function main() {
     assert.strictEqual(after.Items.length - 1, 7, 'quick count must not add Items rows');
     assert.match(after.Ledger[after.Ledger.length - 1][5], /^Donated 3 item\(s\)$/);
 
+    // A Members tab from before phone was required: one "Contact" column that may hold an email.
+    const old = createBackend();
+    old.sheets.Members.rows.splice(0, Infinity,
+      ['Code', 'Name', 'Contact', 'Created', 'Created by'],
+      ['AAAAA', 'Old Phone', '209 555 0123', '', 'x'],
+      ['BBBBB', 'Old Email', 'kw@ucmerced.edu', '', 'x'],
+      ['CCCCC', 'Old None', '', '', 'x']);
+    const found = old.ctx.searchMembers('1234', '');
+    assert.deepStrictEqual(found.map((m) => m.contact), ['', 'kw@ucmerced.edu', '209 555 0123']);
+    assert.deepStrictEqual(old.sheets.Members.rows[0], ['Code', 'Name', 'Phone', 'Created', 'Created by', 'Email']);
+    assert.strictEqual(old.ctx.getMemberForStaff('1234', 'BBBBB').phone, '');
+    old.ctx.createMember('1234', 'x', 'Kylie W', '2095550177', 2, '', 'KW@ucmerced.edu');
+    assert.deepStrictEqual(old.sheets.Members.rows[2], ['BBBBB', 'Old Email', '(209) 555-0177', '', 'x', 'kw@ucmerced.edu']);
+    assert.strictEqual(old.sheets.Members.rows.length, 4, 'matched by email, no duplicate');
+
+    // The staff page flags someone with no phone yet (as older registrations may be) and lets you add one.
+    await staff.route('**/api', async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      if (body.result && body.result.code === code && body.result.history) Object.assign(body.result, { phone: '', contact: '' });
+      await route.fulfill({ response: res, json: body });
+    });
+    await staff.goto(BASE + '?m=' + code);
+    await staff.locator('#noPhone').waitFor();
+    assert(await staff.locator('#contactForm.hidden').count(), 'contact form should start closed');
+    await staff.locator('#noPhone').getByRole('button', { name: 'Add one' }).click();
+    assert.strictEqual(await staff.locator('#editPhone').inputValue(), '');
+    await shot(staff, '6-no-phone');
+    await staff.unroute('**/api');
     console.log('All e2e checks passed. Ticket code used:', code);
   } finally {
     await browser.close();

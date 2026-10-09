@@ -2,7 +2,7 @@
  * Swap Shop digital tickets — Google Apps Script backend.
  *
  * Storage is the Google Sheet this script is bound to:
- *   Members: one row per person (their ticket code, name, contact).
+ *   Members: one row per person (their ticket code, name, phone, email).
  *   Ledger:  one row per ticket change. A person's balance is the sum of
  *            their Ledger "Change" column, so the Sheet is the source of truth
  *            and doubles as an audit log.
@@ -15,7 +15,7 @@
 
 var EVENT_NAME = 'UCM YDSA Swap Shop';
 var PAGE_URL = 'https://hotpotatoes3.github.io/Mobile-ticket-system/'; // the GitHub Pages site
-var API_VERSION = 2; // 2 = donations are itemized
+var API_VERSION = 3; // 2 = donations are itemized, 3 = phone required + separate email
 var MAX_TICKETS_PER_ENTRY = 50; // guards against fat-finger typos
 var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var CODE_LENGTH = 5;
@@ -23,12 +23,12 @@ var CODE_LENGTH = 5;
 var MEMBERS_SHEET = 'Members';
 var LEDGER_SHEET = 'Ledger';
 var ITEMS_SHEET = 'Items';
-var MEMBERS_HEADER = ['Code', 'Name', 'Contact', 'Created', 'Created by'];
+var MEMBERS_HEADER = ['Code', 'Name', 'Phone', 'Created', 'Created by', 'Email'];
 var LEDGER_HEADER = ['Timestamp', 'Code', 'Name', 'Change', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes'];
 var ITEMS_HEADER = ['Timestamp', 'Code', 'Donor', 'Item', 'Description', 'Entry ID', 'Staff', 'Status'];
 
 // Column indexes (0-based) into the rows above.
-var M = { CODE: 0, NAME: 1, CONTACT: 2, CREATED: 3, CREATED_BY: 4 };
+var M = { CODE: 0, NAME: 1, PHONE: 2, CREATED: 3, CREATED_BY: 4, EMAIL: 5 };
 var L = { TS: 0, CODE: 1, NAME: 2, CHANGE: 3, TYPE: 4, NOTE: 5, STAFF: 6, ID: 7, UNDOES: 8 };
 var I = { TS: 0, CODE: 1, DONOR: 2, ITEM: 3, DESC: 4, ENTRY: 5, STAFF: 6, STATUS: 7 };
 
@@ -44,6 +44,7 @@ var API = {
   searchMembers: searchMembers,
   getMemberForStaff: getMemberForStaff,
   createMember: createMember,
+  updateContact: updateContact,
   addTickets: addTickets,
   redeemTickets: redeemTickets,
   undoEntry: undoEntry,
@@ -120,7 +121,7 @@ function staffLogin(pin) {
   return true;
 }
 
-/** Search by code, name, or contact. Empty query returns the most recent people. */
+/** Search by code, name, phone, or email. Empty query returns the most recent people. */
 function searchMembers(pin, query) {
   checkPin_(pin);
   var data = loadData_();
@@ -130,8 +131,8 @@ function searchMembers(pin, query) {
     if (!q) return true;
     if (m.code.toLowerCase() === q) return true;
     if (m.name.toLowerCase().indexOf(q) !== -1) return true;
-    if (m.contact.toLowerCase().indexOf(q) !== -1) return true;
-    return digits.length >= 4 && m.contact.replace(/\D/g, '').indexOf(digits) !== -1;
+    if (m.email.toLowerCase().indexOf(q) !== -1) return true;
+    return digits.length >= 4 && m.phone.replace(/\D/g, '').indexOf(digits) !== -1;
   });
   return matches
     .slice(-25)
@@ -149,40 +150,65 @@ function getMemberForStaff(pin, code) {
   if (!member) throw new Error('No one with code "' + code + '".');
   var wallet = publicWallet_(member, data);
   wallet.contact = member.contact;
+  wallet.phone = member.phone;
+  wallet.email = member.email;
   wallet.history = entriesFor_(data, member.code).map(staffEntry_);
   return wallet;
 }
 
 /**
  * Register a new donor and (optionally) credit their first donation in one step.
+ * A phone number is required (for reminder texts); email is optional.
  * `items` is a list of {name, description} (1 item = 1 ticket), or a plain count.
- * If the contact matches someone already registered, credits that person instead
- * of creating a duplicate.
+ * If the phone or email matches someone already registered, credits that person
+ * instead of creating a duplicate.
  */
-function createMember(pin, staff, name, contact, items, note) {
+function createMember(pin, staff, name, phone, items, note, email) {
   checkPin_(pin);
   name = cleanText_(name, 60);
-  contact = cleanText_(contact, 80);
   if (!name) throw new Error('Please enter a name.');
+  phone = parsePhone_(phone);
+  email = parseEmail_(email);
   var donation = parseDonation_(items, note, true);
 
   return withLock_(function () {
     var data = loadData_();
-    var existing = contact ? findByContact_(data, contact) : null;
+    var existing = findByPhone_(data, phone) || (email ? findByEmail_(data, email) : null);
     var code;
     if (existing) {
       code = existing.code;
+      // Fill in whatever the earlier registration was missing.
+      if (!existing.phone || (email && !existing.email)) {
+        writeContact_(existing, existing.phone || phone, existing.email || email);
+      }
     } else {
       code = newCode_(data);
       getSheet_(MEMBERS_SHEET, MEMBERS_HEADER).appendRow(
-        [code, name, contact, new Date(), cleanText_(staff, 40)].map(sheetSafe_)
+        [code, name, phone, new Date(), cleanText_(staff, 40), email].map(sheetSafe_)
       );
-      data.byCode[code] = { code: code, name: name, contact: contact };
+      data.byCode[code] = { code: code, name: name, phone: phone, email: email };
     }
     if (donation.count) donate_(data.byCode[code], donation, staff);
     var result = getMemberForStaff(pin, code);
     result.matchedExisting = !!existing;
     return result;
+  });
+}
+
+/** Add or correct a person's phone (required) and email (optional). */
+function updateContact(pin, staff, code, phone, email) {
+  checkPin_(pin);
+  phone = parsePhone_(phone);
+  email = parseEmail_(email);
+  return withLock_(function () {
+    var data = loadData_();
+    var member = requireMember_(data, code);
+    var other = findByPhone_(data, phone);
+    if (other && other.code !== member.code) {
+      throw new Error('That phone number already belongs to ' + other.name + ' (' + other.code + ').');
+    }
+    writeContact_(member, phone, email);
+    return getMemberForStaff(pin, member.code);
   });
 }
 
@@ -287,6 +313,13 @@ function getSheet_(name, header) {
     sheet = ss.insertSheet(name);
     sheet.appendRow(header);
     sheet.setFrozenRows(1);
+  } else if (sheet.getLastColumn() < header.length) {
+    // Sheet made by an older version: add the new columns' headers.
+    var have = sheet.getLastColumn();
+    sheet.getRange(1, have + 1, 1, header.length - have).setValues([header.slice(have)]);
+    if (name === MEMBERS_SHEET && sheet.getRange(1, M.PHONE + 1).getValue() === 'Contact') {
+      sheet.getRange(1, M.PHONE + 1).setValue('Phone');
+    }
   }
   return sheet;
 }
@@ -301,10 +334,17 @@ function readRows_(name, header) {
 /** Loads everything once per request; the event is small enough for this. */
 function loadData_() {
   var members = readRows_(MEMBERS_SHEET, MEMBERS_HEADER)
-    .filter(function (r) { return r[M.CODE]; })
-    .map(function (r) {
-      return { code: String(r[M.CODE]).toUpperCase(), name: String(r[M.NAME]), contact: String(r[M.CONTACT]) };
-    });
+    .map(function (r, i) {
+      var phone = String(r[M.PHONE] || '');
+      var email = String(r[M.EMAIL] || '');
+      // Older versions had one "Contact" column that could hold an email.
+      if (phone.indexOf('@') !== -1 && !email) { email = phone; phone = ''; }
+      return {
+        row: i + 2, code: String(r[M.CODE]).toUpperCase(), name: String(r[M.NAME]),
+        phone: phone, email: email, contact: [phone, email].filter(String).join(' · ')
+      };
+    })
+    .filter(function (m) { return m.code; });
   var byCode = {};
   members.forEach(function (m) { byCode[m.code] = m; });
 
@@ -431,21 +471,48 @@ function requireMember_(data, code) {
   return member;
 }
 
-function findByContact_(data, contact) {
-  var key = contactKey_(contact);
-  if (!key) return null;
+/** Phone numbers compare by their last 10 digits, emails case-insensitively. */
+function findByPhone_(data, phone) {
+  var key = String(phone).replace(/\D/g, '').slice(-10);
   for (var i = 0; i < data.members.length; i++) {
-    if (contactKey_(data.members[i].contact) === key) return data.members[i];
+    var p = data.members[i].phone.replace(/\D/g, '');
+    if (p && p.slice(-10) === key) return data.members[i];
   }
   return null;
 }
 
-/** Phone numbers compare by digits, emails case-insensitively. */
-function contactKey_(contact) {
-  var c = String(contact || '').trim().toLowerCase();
-  if (c.indexOf('@') !== -1) return c;
-  var digits = c.replace(/\D/g, '');
-  return digits.length >= 7 ? digits.slice(-10) : c;
+function findByEmail_(data, email) {
+  for (var i = 0; i < data.members.length; i++) {
+    if (data.members[i].email.toLowerCase() === email) return data.members[i];
+  }
+  return null;
+}
+
+/** Required. US numbers are stored as (209) 555-0101; others as +<digits>. */
+function parsePhone_(phone) {
+  var raw = cleanText_(phone, 40);
+  var digits = raw.replace(/\D/g, '');
+  var intl = raw.charAt(0) === '+' && raw.indexOf('+1') !== 0;
+  if (!intl && digits.length === 11 && digits.charAt(0) === '1') digits = digits.slice(1);
+  if (!intl && digits.length === 10) {
+    return '(' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6);
+  }
+  if (intl && digits.length >= 8 && digits.length <= 15) return '+' + digits;
+  throw new Error(raw ? 'That phone number doesn\'t look right. Use 10 digits, like 209-555-0101.'
+                      : 'Please enter a phone number (we text a reminder before the shop).');
+}
+
+/** Optional. */
+function parseEmail_(email) {
+  var e = cleanText_(email, 80).toLowerCase();
+  if (e && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new Error('That email doesn\'t look right.');
+  return e;
+}
+
+function writeContact_(member, phone, email) {
+  var sheet = getSheet_(MEMBERS_SHEET, MEMBERS_HEADER);
+  sheet.getRange(member.row, M.PHONE + 1).setValue(sheetSafe_(phone));
+  sheet.getRange(member.row, M.EMAIL + 1).setValue(sheetSafe_(email));
 }
 
 function newCode_(data) {

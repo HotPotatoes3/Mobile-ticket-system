@@ -23,6 +23,7 @@ function fakeSheet(name) {
     appendRow(r) { rows.push(r.map(unquote)); },
     setFrozenRows() {},
     getLastRow() { return rows.length; },
+    getLastColumn() { return rows.reduce((n, r) => Math.max(n, r.length), 0); },
     getRange(row, col, numRows = 1, numCols = 1) {
       return {
         getValues: () => rows.slice(row - 1, row - 1 + numRows).map((r) => {
@@ -38,6 +39,7 @@ function fakeSheet(name) {
           return this;
         },
         setValue(v) { return this.setValues([[v]]); },
+        getValue: () => (rows[row - 1] || [])[col - 1] ?? '',
       };
     },
   };
@@ -113,4 +115,4 @@ function start() {
 if (require.main === module) {
   start().then(() => console.log(`Swap Shop preview on http://localhost:${PORT}  (staff PIN: ${PIN})`));
 }
-module.exports = { start, PORT };
+module.exports = { start, PORT, createBackend };

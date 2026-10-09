@@ -18,8 +18,8 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
 ## How it works at the table
 
 **Donation drop-off (Oct 5–22, during tabling or by appointment)**
-1. Volunteer opens the app → **New donor** → types a name (and phone/email if they'll give it)
-   → sets how many items they dropped off → **Register + give N tickets**.
+1. Volunteer opens the app → **New donor** → types a name and **phone number** (required, so
+   we can text a reminder before the shop; email is optional) → sets how many items they dropped off → **Register + give N tickets**.
    - **Quick count** (the default) is just a number. Nothing to describe.
    - **List items** records each item instead: a name (tap a quick button like **+ Jacket**, or
      type one) and an optional description ("blue denim, size M"). The ticket count is the
@@ -31,6 +31,8 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
 3. Someone who comes back with more donations: **Find** them by name, phone, or code
    → **Donation** → count or list the items → **+ Give**. If you register someone again with the same phone or email, the app spots that
    and adds the tickets to their existing account.
+4. Someone registered before phone numbers were required gets a red **No phone number on file**
+   note on their page. Tap **Add one**. The **Edit** link next to their code fixes a typo the same way.
 
 **Shop day (Oct 23, 6–8pm, Pavilion Lawn)**
 1. The shopper shows their ticket page. A volunteer either scans the QR with their phone camera
@@ -48,7 +50,9 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
   description, and the volunteer who logged it. Quick-count donations only appear in the Ledger. Sort or filter it like any sheet (e.g. to count jackets). If a donation
   is undone, its items stay but the **Status** column says `Undone`.
 - **Ledger**: every ticket change (donations, spends, undos). Balances are calculated from this.
-- **Members**: everyone registered, with their code and contact.
+- **Members**: everyone registered, with their code, phone, and email. For reminder texts, copy
+  the **Phone** column. (Sheets from before phone was required get the **Email** column added
+  automatically, and old emails in the Phone column are still recognized.)
 - **Balances**: live total of tickets per person.
 
 The Items tab is created automatically the first time items are logged. You don't need to re-run

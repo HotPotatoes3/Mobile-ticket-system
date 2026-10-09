@@ -171,17 +171,47 @@ async function call(fn, ...args) {
   return data.result;
 }
 
-/** Donations send item lists, which older copies of Code.gs would silently ignore. */
-const NEEDS_API_VERSION = 2;
-let serverCheck = null;
-function ensureServerUpToDate() {
-  serverCheck = serverCheck || call('getConfig').then((cfg) => {
-    if (!(cfg.apiVersion >= NEEDS_API_VERSION)) {
-      throw new Error('The ticket server (Code.gs) is out of date. Ask an organizer to update it — see the README.');
-    }
-  });
-  serverCheck.catch(() => { serverCheck = null; });
-  return serverCheck;
+/**
+ * Older copies of Code.gs would silently drop newer data: item lists need
+ * version 2, separate emails and editing contact info need version 3.
+ */
+let serverConfig = null;
+async function ensureServerUpToDate(minVersion = 2) {
+  serverConfig = serverConfig || call('getConfig');
+  serverConfig.catch(() => { serverConfig = null; });
+  const cfg = await serverConfig;
+  if (!(cfg.apiVersion >= minVersion)) {
+    throw new Error('The ticket server (Code.gs) is out of date. Ask an organizer to update it — see the README.');
+  }
+}
+
+/** Same rule as parsePhone_ in Code.gs, so the form can say what's wrong right away. */
+function phoneProblem(v) {
+  const digits = v.replace(/\D/g, '');
+  if (!v.trim()) return 'Please enter a phone number (we text a reminder before the shop).';
+  const ok = /^\s*\+(?!1)/.test(v)
+    ? digits.length >= 8 && digits.length <= 15
+    : digits.length === 10 || (digits.length === 11 && digits[0] === '1');
+  return ok ? '' : "That phone number doesn't look right. Use 10 digits, like 209-555-0101.";
+}
+
+/** Phone (required) + email (optional) inputs, shared by New donor and Edit contact. */
+function contactFields(prefix, phone = '', email = '') {
+  const phoneIn = h('input', { id: prefix + 'Phone', type: 'tel', inputmode: 'tel', placeholder: 'e.g. 209-555-0101', autocomplete: 'off', value: phone });
+  const emailIn = h('input', { id: prefix + 'Email', type: 'email', inputmode: 'email', placeholder: 'Optional', autocomplete: 'off', value: email });
+  return {
+    el: [
+      h('label', { for: prefix + 'Phone' }, 'Phone number (required, for a reminder text)'), phoneIn,
+      h('label', { for: prefix + 'Email' }, 'Email (optional)'), emailIn,
+    ],
+    phoneIn,
+    /** Throws with a friendly message if the phone is missing or malformed. */
+    values() {
+      const problem = phoneProblem(phoneIn.value);
+      if (problem) { phoneIn.focus(); throw new Error(problem); }
+      return { phone: phoneIn.value.trim(), email: emailIn.value.trim() };
+    },
+  };
 }
 
 function errMsg(e) { return (e && e.message ? e.message : String(e)).replace(/^Exception:\s*/, ''); }
@@ -554,15 +584,18 @@ function donationInput(min) {
 
 function newDonorTab(body) {
   const name = h('input', { id: 'newName', placeholder: 'First name + last initial', autocomplete: 'off' });
-  const contact = h('input', { id: 'newContact', placeholder: 'Phone or email (optional, helps find them later)', autocomplete: 'off', inputmode: 'email' });
+  const contact = contactFields('new');
   const items = donationInput(0);
   const btn = h('button', { class: 'go full', id: 'registerBtn' });
   const label = (n) => { btn.textContent = n ? 'Register + give ' + plural(n, 'ticket') : 'Register (no tickets yet)'; };
   label(items.count());
   items.onChange(label);
   btn.addEventListener('click', () => busy(btn, async () => {
-    await ensureServerUpToDate();
-    const m = await call('createMember', state.pin, state.staff, name.value, contact.value, items.value(), '');
+    if (!name.value.trim()) { name.focus(); throw new Error('Please enter a name.'); }
+    const { phone, email } = contact.values();
+    // Older servers still work without an email: the phone goes in their Contact column.
+    await ensureServerUpToDate(email ? 3 : 2);
+    const m = await call('createMember', state.pin, state.staff, name.value, phone, items.value(), '', email);
     toast(m.matchedExisting ? 'Already registered — added to ' + m.name : 'Registered ' + m.name);
     go({ m: m.code, fresh: '1' });
   }).finally(() => label(items.count())));
@@ -570,7 +603,7 @@ function newDonorTab(body) {
     h('div', { class: 'card' },
       h('h2', {}, 'New donor'),
       h('label', { for: 'newName' }, 'Name'), name,
-      h('label', { for: 'newContact' }, 'Phone or email'), contact,
+      ...contact.el,
       h('label', {}, 'Items donated (1 item = 1 ticket)'), items.el,
       btn
     )
@@ -683,6 +716,26 @@ function renderStaffMember(m, flash) {
     });
   };
 
+  // Contact info: phone is required for reminder texts, so flag people who don't have one yet.
+  const contact = contactFields('edit', m.phone || '', m.email || '');
+  const saveBtn = h('button', { class: 'go full', id: 'saveContactBtn' }, 'Save');
+  saveBtn.addEventListener('click', () => busy(saveBtn, async () => {
+    const { phone, email } = contact.values();
+    await ensureServerUpToDate(3);
+    const updated = await call('updateContact', state.pin, state.staff, m.code, phone, email);
+    renderStaffMember(updated, { ok: 'Contact info saved.' });
+  }));
+  const contactForm = h('div', { class: 'hidden', id: 'contactForm' }, ...contact.el, saveBtn);
+  const openContact = () => { contactForm.classList.remove('hidden'); contact.phoneIn.focus(); };
+  const contactLine = h('div', { class: 'center muted' },
+    h('span', { class: 'pill' }, m.code), m.contact ? ' ' + m.contact + ' ' : ' ',
+    h('button', { class: 'link small', id: 'editContactBtn', onclick: openContact }, 'Edit')
+  );
+  const missingPhone = m.phone === '' ? h('div', { class: 'notice err', id: 'noPhone' },
+    'No phone number on file. ',
+    h('button', { class: 'link small', onclick: openContact }, 'Add one'),
+    ' so we can text them a reminder before the shop.') : null;
+
   const qrCard = h('div', { class: 'card center' },
     h('h2', {}, 'Give them their ticket'),
     h('p', { class: 'muted' }, 'Have them scan this with their phone camera and bookmark the page — or write down the code.'),
@@ -696,11 +749,13 @@ function renderStaffMember(m, flash) {
     flash && flash.ok ? h('div', { class: 'notice ok', id: 'flash' }, flash.ok) : null,
     h('div', { class: 'card' },
       h('div', { class: 'who' }, m.name),
-      h('div', { class: 'center muted' }, h('span', { class: 'pill' }, m.code), m.contact ? ' ' + m.contact : ''),
+      contactLine,
       h('div', { class: 'balance' },
         h('div', { class: 'num', id: 'balance' }, m.balance),
         h('div', { class: 'lbl' }, m.balance === 1 ? 'ticket' : 'tickets')
-      )
+      ),
+      missingPhone,
+      contactForm
     ),
     h('div', { class: 'card' }, modeBar, givePanel, shopPanel),
     qrCard,
