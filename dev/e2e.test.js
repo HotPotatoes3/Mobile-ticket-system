@@ -318,6 +318,7 @@ async function main() {
     const paperNums = () => staff.locator('.stats.three .stat b').allInnerTexts();
     await staff.locator('#collectBtn').waitFor();
     assert.deepStrictEqual(await paperNums(), ['5', '0', '5']);
+    assert(!/null/.test(await staff.locator('#app').innerText()), 'stray "null" on the page');
     for (let i = 0; i < 3; i++) await staff.getByRole('button', { name: 'More' }).click();
     await staff.getByRole('button', { name: '− Collect 4 paper tickets' }).click();
     await staff.locator('#flash', { hasText: 'Collected 4 paper tickets.' }).waitFor();

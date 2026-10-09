@@ -247,7 +247,9 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 
-function render(...nodes) { app.replaceChildren(...nodes.filter((n) => n != null)); window.scrollTo(0, 0); }
+/** Like replaceChildren, but skips null (which replaceChildren would show as the text "null"). */
+function fill(el, ...nodes) { el.replaceChildren(...nodes.filter((n) => n != null)); }
+function render(...nodes) { fill(app, ...nodes); window.scrollTo(0, 0); }
 
 let toastTimer;
 function toast(msg, isErr) {
@@ -788,7 +790,7 @@ async function statsTab(body) {
   try {
     const s = await call('getStats', state.pin);
     const stat = (n, l) => h('div', { class: 'stat' }, h('b', {}, n), h('span', { class: 'muted' }, l));
-    body.replaceChildren(
+    fill(body,
       h('div', { class: 'card' },
         h('h2', {}, 'Totals'),
         h('div', { class: 'stats' },
@@ -870,7 +872,7 @@ async function paperTab(body, flash) {
     paperTab(body, 'Undone.');
   });
 
-  body.replaceChildren(
+  fill(body,
     flash ? h('div', { class: 'notice ok', id: 'flash' }, flash) : null,
     h('div', { class: 'card' },
       h('h2', {}, 'Collect paper tickets'),
