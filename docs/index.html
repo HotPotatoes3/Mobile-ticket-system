@@ -64,6 +64,7 @@
     button.primary { background: var(--red); color: var(--red-ink); }
     button.go { background: var(--green); color: var(--green-ink); }
     button.link { background: none; color: var(--muted); padding: 8px; min-height: 0; text-decoration: underline; font-weight: 500; }
+    button.link.inline { padding: 0; font-size: inherit; vertical-align: baseline; }
     button.small { padding: 6px 10px; min-height: 0; font-size: 13px; border-radius: 8px; }
     .full { width: 100%; margin-top: 12px; }
     .row { display: flex; gap: 10px; }
@@ -990,7 +991,7 @@ function renderStaffMember(m, flash) {
     h('p', { class: 'muted' }, 'How many items are they taking?'),
     count.el, note, redeemBtn,
     h('p', { class: 'muted' }, 'Paying with paper tickets? ',
-      h('button', { class: 'link small', id: 'toPaperTab', onclick: () => { state.tab = 'paper'; go({}); } }, 'Collect them in the Paper tab'), '.'));
+      h('button', { class: 'link inline', id: 'toPaperTab', onclick: () => { state.tab = 'paper'; go({}); } }, 'Collect them in the Paper tab'), '.'));
   const modeBtns = {};
   const setMode = (mode) => {
     state.mode = mode;
