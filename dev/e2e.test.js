@@ -178,7 +178,7 @@ async function main() {
     // Stats.
     await staff.getByRole('button', { name: 'Stats' }).click();
     await staff.getByText('Recent activity').waitFor();
-    const stats = await staff.locator('.stat b').allInnerTexts();
+    const stats = await staff.locator('.stats:not(.three) .stat b').allInnerTexts();
     assert.deepStrictEqual(stats, ['2', '5', '5', '0'], 'stats: people, unspent, given, spent');
     await shot(staff, '4-stats');
 
@@ -248,7 +248,7 @@ async function main() {
     assert.match(await err('createMember', '1234', 'x', 'Bad', '2095550111', 1, '', 'not-an-email'), /email doesn't look right/);
     assert.match(await err('updateContact', '1234', 'x', code, '', ''), /enter a phone number/);
 
-    assert.strictEqual((await rpc(holder, 'getConfig')).result.apiVersion, 3);
+    assert.strictEqual((await rpc(holder, 'getConfig')).result.apiVersion, 4);
 
     // Quick count: just a number of tickets, no item details. The phone remembers the choice.
     await staff.goto(BASE + '?m=' + code);
@@ -275,6 +275,87 @@ async function main() {
     assert.strictEqual(after.Items.length - 1, 7, 'quick count must not add Items rows');
     assert.match(after.Ledger[after.Ledger.length - 1][5], /^Donated 3 item\(s\)$/);
 
+    // Paper tickets: handed out against a donor (never touching their phone balance), with ticket numbers.
+    const boCode = new URL(staff.url()).searchParams.get('m');
+    await staff.locator('#modeGive').click();
+    assert(await staff.locator('#givePhone.on').count(), 'phone tickets should be the default');
+    await staff.locator('#givePaper').click();
+    await staff.getByRole('button', { name: 'More' }).first().click();
+    await staff.getByRole('button', { name: 'More' }).first().click();
+    await staff.fill('#paperFirst', '001041');
+    await shot(staff, '2d-give-paper');
+    await staff.getByRole('button', { name: '+ Give 3 paper tickets' }).click();
+    await staff.locator('#flash', { hasText: 'Hand them 3 paper tickets (#001041–001043).' }).waitFor();
+    assert.strictEqual(await balance(staff), 0, 'paper must not change the phone balance');
+    assert.strictEqual(await staff.locator('#paperLine').innerText(), '+ 3 paper tickets handed out');
+    assert.match(await staff.locator('.list li').first().innerText(), /\+3 paper/);
+    assert.match(await staff.locator('.list li').first().innerText(), /#001041–001043/);
+    assert(await staff.locator('#givePhone.on').count(), 'paper choice must not stick');
+    // Overlapping ticket numbers are refused (catches typos and double handouts).
+    await staff.locator('#givePaper').click();
+    await staff.fill('#paperFirst', '1043');
+    await staff.locator('#addBtn').click();
+    await staff.locator('#toast', { hasText: 'overlaps #001041–001043, already given to Bo T' }).waitFor();
+    await staff.fill('#paperFirst', '10a');
+    await staff.locator('#addBtn').click();
+    await staff.locator('#toast', { hasText: 'digits only' }).waitFor();
+
+    // A new donor can be registered straight into paper tickets (no ticket number noted).
+    await staff.getByRole('button', { name: '← Back to search' }).click();
+    await staff.getByRole('button', { name: 'New donor' }).click();
+    await staff.fill('#newName', 'Cy P');
+    await staff.fill('#newPhone', '209-555-0190');
+    await staff.getByRole('button', { name: 'More' }).click();
+    await staff.locator('#givePaper').click();
+    await staff.getByRole('button', { name: 'Register + give 2 paper tickets' }).click();
+    await staff.locator('#flash', { hasText: 'Hand them 2 paper tickets.' }).waitFor();
+    assert(await staff.locator('.card.center.hidden', { hasText: 'Give them their ticket' }).count(), 'no QR pop-up for paper');
+    assert.strictEqual(await staff.locator('#paperLine').innerText(), '+ 2 paper tickets handed out');
+
+    // Paper tab: collect paper at checkout, see what's still out, look up a ticket number, undo.
+    await staff.getByRole('button', { name: '← Back to search' }).click();
+    await staff.getByRole('button', { name: 'Paper' }).click();
+    const paperNums = () => staff.locator('.stats.three .stat b').allInnerTexts();
+    await staff.locator('#collectBtn').waitFor();
+    assert.deepStrictEqual(await paperNums(), ['5', '0', '5']);
+    for (let i = 0; i < 3; i++) await staff.getByRole('button', { name: 'More' }).click();
+    await staff.getByRole('button', { name: '− Collect 4 paper tickets' }).click();
+    await staff.locator('#flash', { hasText: 'Collected 4 paper tickets.' }).waitFor();
+    assert.deepStrictEqual(await paperNums(), ['5', '4', '1']);
+    assert.match(await staff.locator('#paperRecent li').first().innerText(), /Collected 4 paper tickets[\s\S]*−4 paper/);
+    await staff.fill('#checkNum', '1042');
+    await staff.locator('#checkBtn').click();
+    await staff.locator('#checkResult', { hasText: 'Given to Bo T (' + boCode + ') · #001041–001043' }).waitFor();
+    await staff.fill('#checkNum', '2000');
+    await staff.locator('#checkBtn').click();
+    await staff.locator('#checkResult', { hasText: 'Not in any recorded handout' }).waitFor();
+    assert(await noHScroll(staff), 'paper tab scrolls sideways');
+    await shot(staff, '7-paper-tab');
+    const undoCollect = staff.locator('#paperRecent li').first().getByRole('button', { name: 'Undo' });
+    await undoCollect.click();
+    await staff.locator('#paperRecent li').first().getByRole('button', { name: 'Tap to confirm' }).click();
+    await staff.locator('#flash', { hasText: 'Undone.' }).waitFor();
+    assert.deepStrictEqual(await paperNums(), ['5', '0', '5']);
+    await staff.getByRole('button', { name: 'Stats' }).click();
+    await staff.getByRole('heading', { name: 'Paper tickets' }).waitFor();
+    assert.deepStrictEqual(await paperNums(), ['5', '0', '5']);
+    await staff.getByRole('button', { name: 'Find' }).click();
+    await staff.fill('#search', 'Bo T');
+    await staff.locator('.list li', { hasText: '+3 paper' }).waitFor();
+
+    // The donor sees their paper tickets too; the sheet has them in the Ledger's Paper column.
+    await holder.goto(BASE + '?m=' + boCode);
+    assert.strictEqual(await holder.locator('#paperLine').innerText(), '+ 3 paper tickets given to you — bring them to the shop');
+    const sheetsNow = await staff.evaluate(() => fetch('/__sheets').then((r) => r.json()));
+    assert.deepStrictEqual(sheetsNow.Ledger[0].slice(-2), ['Paper', 'Ticket #s']);
+    const collectRow = sheetsNow.Ledger.find((r) => r[4] === 'PAPER_IN');
+    assert.deepStrictEqual([collectRow[1], collectRow[3], collectRow[9]], ['', 0, -4]);
+    assert(sheetsNow.Ledger.some((r) => r[1] === boCode && r[3] === 0 && r[9] === 3 && r[10] === '#001041–001043'));
+    assert.match(await err('collectPaper', '1234', 'x', 0, ''), /whole number/);
+    assert.match(await err('collectPaper', '9999', 'x', 1, ''), /Wrong staff PIN/);
+    assert.match(await err('addTickets', '1234', 'x', boCode, 1, '', { first: '12-3' }), /digits only/);
+    assert.match(await err('checkPaperTicket', '1234', ''), /digits only/);
+
     // A Members tab from before phone was required: one "Contact" column that may hold an email.
     const old = createBackend();
     old.sheets.Members.rows.splice(0, Infinity,
@@ -289,6 +370,30 @@ async function main() {
     old.ctx.createMember('1234', 'x', 'Kylie W', '2095550177', 2, '', 'KW@ucmerced.edu');
     assert.deepStrictEqual(old.sheets.Members.rows[2], ['BBBBB', 'Old Email', '(209) 555-0177', '', 'x', 'kw@ucmerced.edu']);
     assert.strictEqual(old.sheets.Members.rows.length, 4, 'matched by email, no duplicate');
+    // A Ledger from before paper tickets gets the two new columns; its rows still count.
+    old.sheets.Ledger.rows.splice(0, Infinity,
+      ['Timestamp', 'Code', 'Name', 'Change', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes'],
+      ['', 'AAAAA', 'Old Phone', 2, 'DONATION', 'Donated 2 item(s)', 'x', 'e1', '']);
+    assert.strictEqual(old.ctx.getWallet('AAAAA').balance, 2);
+    old.ctx.addTickets('1234', 'x', 'AAAAA', 1, '', { first: '7' });
+    assert.deepStrictEqual(old.sheets.Ledger.rows[0].slice(-2), ['Paper', 'Ticket #s']);
+    assert.deepStrictEqual([old.ctx.getWallet('AAAAA').balance, old.ctx.getWallet('AAAAA').paper], [2, 1]);
+    assert.strictEqual(old.ctx.checkPaperTicket('1234', '#7').entry.code, 'AAAAA');
+
+    // An out-of-date server (before paper tickets) must refuse paper rather than give phone tickets.
+    const v3 = await newPage();
+    await v3.route('**/api', async (route) => {
+      if (JSON.parse(route.request().postData()).fn === 'getConfig') return route.fulfill({ json: { ok: true, result: { apiVersion: 3 } } });
+      return route.continue();
+    });
+    await v3.goto(BASE);
+    await v3.evaluate(() => { localStorage.setItem('swapshop.pin', '1234'); localStorage.setItem('swapshop.staff', 'Maya'); });
+    await v3.goto(BASE + '?m=' + boCode);
+    await v3.locator('#modeGive').click();
+    await v3.locator('#givePaper').click();
+    await v3.locator('#addBtn').click();
+    await v3.locator('#toast', { hasText: 'out of date' }).waitFor();
+    assert.strictEqual((await rpc(v3, 'getWallet', boCode)).result.paper, 3, 'nothing given');
 
     // The staff page flags someone with no phone yet (as older registrations may be) and lets you add one.
     await staff.route('**/api', async (route) => {

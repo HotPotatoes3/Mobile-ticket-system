@@ -71,6 +71,7 @@
     .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
     .tabs button { flex: 1; background: var(--card); border: 1px solid var(--line); }
     .tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+    .tabs:not(.sub) button { padding: 12px 4px; white-space: nowrap; font-size: 15px; }
     .tabs.sub { margin-bottom: 8px; }
     .tabs.sub button { min-height: 0; padding: 7px 10px; font-size: 14px; }
     .tabs.sub button.on { background: var(--soft-green); color: var(--green); border-color: var(--green); }
@@ -126,6 +127,12 @@
     ul.items-given li { padding: 1px 0; border: 0; display: list-item; }
     ul.items-given .muted { font-size: 13px; }
     .hidden { display: none !important; }
+    .stats.three { grid-template-columns: 1fr 1fr 1fr; }
+    .stats.three .stat b { font-size: 24px; }
+    .chg.paper { white-space: nowrap; min-width: 64px; }
+    .paper-line { text-align: center; font-weight: 600; color: var(--green); margin-top: 4px; }
+    .lookup { display: flex; gap: 8px; }
+    .lookup input { flex: 1; min-width: 0; }
     #keepHandy .full { margin-top: 0; }
     #keepHandy p { margin: 10px 0 0; }
     .share-icon { display: inline-block; width: 13px; height: 16px; vertical-align: -2px; background: currentColor;
@@ -146,7 +153,7 @@
 // Helpers
 // ---------------------------------------------------------------------------
 const app = document.getElementById('app');
-const state = { mode: 'give', pin: '', staff: '', tab: 'find', code: '' };
+const state = { mode: 'give', pin: '', staff: '', tab: 'find', code: '', flash: '' };
 
 const store = {
   get(k) { try { return localStorage.getItem('swapshop.' + k) || ''; } catch (e) { return ''; } },
@@ -180,7 +187,8 @@ async function call(fn, ...args) {
 
 /**
  * Older copies of Code.gs would silently drop newer data: item lists need
- * version 2, separate emails and editing contact info need version 3.
+ * version 2, separate emails and editing contact info need version 3, and
+ * paper tickets need version 4 (an older server would give phone tickets instead).
  */
 let serverConfig = null;
 async function ensureServerUpToDate(minVersion = 2) {
@@ -289,7 +297,25 @@ function qrBox(code) {
 }
 
 function changeCell(e) {
+  if (!e.change && e.paper) {
+    return h('span', { class: 'chg paper ' + (e.paper > 0 ? 'plus' : 'minus') }, (e.paper > 0 ? '+' : '−') + Math.abs(e.paper) + ' paper');
+  }
   return h('span', { class: 'chg ' + (e.change > 0 ? 'plus' : 'minus') }, (e.change > 0 ? '+' : '') + e.change);
+}
+
+/** "Undo" buttons need a second tap within 4 seconds, so a stray tap can't undo anything. */
+function confirmUndo(btn, fn) {
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Tap to confirm';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Undo'; }, 4000);
+    return;
+  }
+  busy(btn, fn);
+}
+
+function paperLine(n, text) {
+  return n > 0 ? h('div', { class: 'paper-line', id: 'paperLine' }, '+ ' + plural(n, 'paper ticket') + ' ' + text) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +330,12 @@ function go(params) {
 function route(params) {
   state.code = (params.m || '').toUpperCase();
   updateHeader();
-  if (state.code) return isStaff() ? showStaffMember(state.code, params.fresh === '1' ? { showQr: true } : null) : showWallet(state.code);
+  if (state.code) {
+    if (!isStaff()) return showWallet(state.code);
+    const flash = { showQr: params.fresh === '1', ok: state.flash };
+    state.flash = '';
+    return showStaffMember(state.code, flash);
+  }
   if (params.staff === '1' && !isStaff()) return showLogin();
   return isStaff() ? showStaffHome() : showHome();
 }
@@ -357,6 +388,7 @@ async function showWallet(code) {
           h('div', { class: 'num', id: 'balance' }, w.balance),
           h('div', { class: 'lbl' }, w.balance === 1 ? 'ticket' : 'tickets')
         ),
+        paperLine(w.paper, 'given to you — bring them to the shop'),
         qrBox(w.code),
         h('div', { class: 'codebig' }, w.code),
         h('p', { class: 'muted center' }, 'Show this screen at the Swap Shop. Bookmark or screenshot it so you don\'t lose it!')
@@ -456,7 +488,7 @@ function historyCard(history, staffMode, onUndo) {
         items.length ? h('ul', { class: 'items-given' }, items.map((it) =>
           h('li', {}, it.name, it.description ? h('span', { class: 'muted' }, ' — ' + it.description) : null)
         )) : null,
-        h('div', { class: 'muted' }, fmtTime(e.ts), staffMode && e.staff ? ' · ' + e.staff : '', e.undone ? ' · undone' : '')
+        h('div', { class: 'muted' }, fmtTime(e.ts), staffMode && e.staff ? ' · ' + e.staff : '', e.serials ? ' · ' + e.serials : '', e.undone ? ' · undone' : '')
       ),
       changeCell(e),
       undoBtn
@@ -499,7 +531,7 @@ function showLogin() {
 }
 
 function showStaffHome() {
-  const tabs = [['find', 'Find'], ['new', 'New donor'], ['stats', 'Stats']];
+  const tabs = [['find', 'Find'], ['new', 'New donor'], ['paper', 'Paper'], ['stats', 'Stats']];
   const body = h('div', {});
   const tabBar = h('div', { class: 'tabs' }, tabs.map(([id, label]) =>
     h('button', { class: state.tab === id ? 'on' : '', onclick: () => { state.tab = id; showStaffHome(); } }, label)
@@ -507,6 +539,7 @@ function showStaffHome() {
   render(tabBar, body);
   if (state.tab === 'find') findTab(body);
   else if (state.tab === 'new') newDonorTab(body);
+  else if (state.tab === 'paper') paperTab(body);
   else statsTab(body);
 }
 
@@ -525,7 +558,7 @@ function findTab(body) {
             h('div', { class: 'title' }, r.name),
             h('div', { class: 'muted' }, h('span', { class: 'pill' }, r.code), r.contact ? ' ' + r.contact : '')
           ),
-          h('span', { class: 'chg' }, plural(r.balance, 'ticket'))
+          h('span', { class: 'chg' }, plural(r.balance, 'ticket'), r.paper ? h('div', { class: 'muted' }, '+' + r.paper + ' paper') : null)
         )) : [h('li', { class: 'muted' }, 'No matches. Add them under "New donor".')]));
     } catch (e) { toast(errMsg(e), true); }
   };
@@ -661,29 +694,89 @@ function donationInput(min) {
   return api;
 }
 
+/**
+ * "Give tickets as: On their phone / Paper tickets". Paper tickets come off a
+ * raffle roll; noting the first ticket's number lets anyone look a ticket up later.
+ * Starts on "phone" every time so paper is always a deliberate choice.
+ */
+function paperChoice() {
+  const first = h('input', { id: 'paperFirst', inputmode: 'numeric', placeholder: 'e.g. 1041', autocomplete: 'off', maxlength: '12' });
+  const panel = h('div', { class: 'hidden' },
+    h('label', { for: 'paperFirst' }, 'First ticket number (optional)'), first,
+    h('p', { class: 'muted' }, 'The number on the first ticket you tear off. It lets volunteers look a ticket up later.')
+  );
+  const listeners = [];
+  const btns = {};
+  let kind = 'phone';
+  const setKind = (k) => {
+    kind = k;
+    panel.classList.toggle('hidden', k !== 'paper');
+    for (const [key, b] of Object.entries(btns)) b.className = key === k ? 'on' : '';
+    listeners.forEach((fn) => fn());
+  };
+  const api = {
+    el: h('div', {},
+      h('label', {}, 'Give tickets as'),
+      h('div', { class: 'tabs sub' },
+        (btns.phone = h('button', { id: 'givePhone', type: 'button', onclick: () => setKind('phone') }, 'On their phone')),
+        (btns.paper = h('button', { id: 'givePaper', type: 'button', onclick: () => setKind('paper') }, 'Paper tickets'))
+      ),
+      panel
+    ),
+    isPaper: () => kind === 'paper',
+    /** What the server expects: null for phone tickets, {first} for paper. */
+    value() {
+      if (kind !== 'paper') return null;
+      const v = first.value.trim().replace(/^#\s*/, '');
+      if (v && !/^\d{1,9}$/.test(v)) { first.focus(); throw new Error('Ticket numbers are digits only, like 1041.'); }
+      return { first: v };
+    },
+    /** e.g. "3 paper tickets" or "3 tickets". */
+    label: (n) => plural(n, kind === 'paper' ? 'paper ticket' : 'ticket'),
+    onChange: (fn) => listeners.push(fn),
+  };
+  setKind('phone');
+  return api;
+}
+
+/** After giving paper tickets: tell the volunteer exactly what to hand over. */
+function paperFlash(m, n) {
+  const serials = (m.history[0] && m.history[0].serials) || '';
+  return 'Hand them ' + plural(n, 'paper ticket') + (serials ? ' (' + serials + ')' : '') + '.';
+}
+
 function newDonorTab(body) {
   const name = h('input', { id: 'newName', placeholder: 'First name + last initial', autocomplete: 'off' });
   const contact = contactFields('new');
   const items = donationInput(0);
+  const paper = paperChoice();
   const btn = h('button', { class: 'go full', id: 'registerBtn' });
-  const label = (n) => { btn.textContent = n ? 'Register + give ' + plural(n, 'ticket') : 'Register (no tickets yet)'; };
-  label(items.count());
+  const label = () => {
+    const n = items.count();
+    btn.textContent = n ? 'Register + give ' + paper.label(n) : 'Register (no tickets yet)';
+  };
+  label();
   items.onChange(label);
+  paper.onChange(label);
   btn.addEventListener('click', () => busy(btn, async () => {
     if (!name.value.trim()) { name.focus(); throw new Error('Please enter a name.'); }
     const { phone, email } = contact.values();
+    const n = items.count();
+    const paperValue = n ? paper.value() : null;
     // Older servers still work without an email: the phone goes in their Contact column.
-    await ensureServerUpToDate(email ? 3 : 2);
-    const m = await call('createMember', state.pin, state.staff, name.value, phone, items.value(), '', email);
+    await ensureServerUpToDate(paperValue ? 4 : email ? 3 : 2);
+    const m = await call('createMember', state.pin, state.staff, name.value, phone, items.value(), '', email, paperValue);
     toast(m.matchedExisting ? 'Already registered — added to ' + m.name : 'Registered ' + m.name);
-    go({ m: m.code, fresh: '1' });
-  }).finally(() => label(items.count())));
+    if (paperValue) state.flash = paperFlash(m, n);
+    go(paperValue ? { m: m.code } : { m: m.code, fresh: '1' });
+  }).finally(label));
   body.append(
     h('div', { class: 'card' },
       h('h2', {}, 'New donor'),
       h('label', { for: 'newName' }, 'Name'), name,
       ...contact.el,
       h('label', {}, 'Items donated (1 item = 1 ticket)'), items.el,
+      paper.el,
       btn
     )
   );
@@ -703,19 +796,104 @@ async function statsTab(body) {
           stat(s.issued, 'tickets given'), stat(s.redeemed, 'tickets spent')
         )
       ),
+      s.paperGiven === undefined ? null : h('div', { class: 'card' },
+        h('h2', {}, 'Paper tickets'),
+        paperStats(s)
+      ),
       h('div', { class: 'card' },
         h('h2', {}, 'Recent activity'),
-        s.recent.length ? h('ul', { class: 'list' }, s.recent.map((e) =>
-          h('li', { class: 'clickable' + (e.undone ? ' struck' : ''), onclick: () => go({ m: e.code }) },
-            h('div', { class: 'grow' },
-              h('div', { class: 'title' }, e.name + ' — ' + e.note),
-              h('div', { class: 'muted' }, fmtTime(e.ts), e.staff ? ' · ' + e.staff : '')
-            ),
-            changeCell(e)
-          ))) : h('p', { class: 'muted' }, 'Nothing yet.')
+        s.recent.length ? h('ul', { class: 'list' }, s.recent.map((e) => activityRow(e))) : h('p', { class: 'muted' }, 'Nothing yet.')
       )
     );
   } catch (e) { body.replaceChildren(h('div', { class: 'notice err' }, errMsg(e))); }
+}
+
+function paperStats(s) {
+  const stat = (n, l, id) => h('div', { class: 'stat', id }, h('b', {}, n), h('span', { class: 'muted' }, l));
+  return h('div', { class: 'stats three' },
+    stat(s.paperGiven, 'handed out', 'paperGiven'), stat(s.paperCollected, 'collected', 'paperCollected'),
+    stat(s.paperOut, 'still out there', 'paperOut'));
+}
+
+/** One line of recent activity. Paper collected at checkout has no person to open. */
+function activityRow(e, onUndo) {
+  const undoBtn = onUndo && !e.undone && e.type !== 'UNDO'
+    ? h('button', { class: 'small', onclick: (ev) => { ev.stopPropagation(); onUndo(e, ev.currentTarget); } }, 'Undo')
+    : null;
+  return h('li', { class: (e.code ? 'clickable' : '') + (e.undone ? ' struck' : ''), onclick: e.code ? () => go({ m: e.code }) : null },
+    h('div', { class: 'grow' },
+      h('div', { class: 'title' }, e.name ? e.name + ' — ' + e.note : e.note),
+      h('div', { class: 'muted' }, fmtTime(e.ts), e.staff ? ' · ' + e.staff : '', e.serials ? ' · ' + e.serials : '', e.undone ? ' · undone' : '')
+    ),
+    changeCell(e),
+    undoBtn
+  );
+}
+
+/** Paper tickets: collect them at checkout, see how many are still out, look one up. */
+async function paperTab(body, flash) {
+  body.replaceChildren(h('p', { class: 'muted center' }, 'Loading…'));
+  let s;
+  try {
+    await ensureServerUpToDate(4);
+    s = await call('getStats', state.pin);
+  } catch (e) { return body.replaceChildren(h('div', { class: 'notice err' }, errMsg(e))); }
+
+  const count = stepper(1, 1);
+  const collectBtn = h('button', { class: 'primary full', id: 'collectBtn' });
+  const collectLabel = (n) => { collectBtn.textContent = '− Collect ' + plural(n, 'paper ticket'); };
+  collectLabel(count.get());
+  count.onChange(collectLabel);
+  collectBtn.addEventListener('click', () => busy(collectBtn, async () => {
+    const n = count.get();
+    await call('collectPaper', state.pin, state.staff, n, '');
+    paperTab(body, 'Collected ' + plural(n, 'paper ticket') + '.');
+  }));
+
+  const num = h('input', { id: 'checkNum', inputmode: 'numeric', placeholder: 'Ticket number', autocomplete: 'off', maxlength: '12' });
+  const result = h('div', { id: 'checkResult' });
+  const checkBtn = h('button', { id: 'checkBtn' }, 'Look up');
+  const check = () => busy(checkBtn, async () => {
+    const r = await call('checkPaperTicket', state.pin, num.value);
+    const e = r.entry;
+    result.replaceChildren(r.found
+      ? h('div', { class: 'notice ok clickable', onclick: () => go({ m: e.code }) },
+          '✓ Given to ', h('b', {}, e.name), ' (' + e.code + ') · ' + e.serials + ' · ' + fmtTime(e.ts) + (e.staff ? ' by ' + e.staff : ''))
+      : h('div', { class: 'notice err' },
+          'Not in any recorded handout. Only handouts where the first ticket number was entered can be looked up.'));
+  });
+  checkBtn.addEventListener('click', check);
+  num.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') check(); });
+
+  const onUndo = (entry, btn) => confirmUndo(btn, async () => {
+    await call('undoEntry', state.pin, state.staff, entry.id);
+    paperTab(body, 'Undone.');
+  });
+
+  body.replaceChildren(
+    flash ? h('div', { class: 'notice ok', id: 'flash' }, flash) : null,
+    h('div', { class: 'card' },
+      h('h2', {}, 'Collect paper tickets'),
+      h('p', { class: 'muted' }, 'At checkout, count the paper tickets they hand you (1 paper ticket = 1 item), log them here, and drop them in the box.'),
+      count.el,
+      collectBtn
+    ),
+    h('div', { class: 'card' },
+      h('h2', {}, 'Paper tickets'),
+      paperStats(s),
+      h('p', { class: 'muted' }, 'To hand out paper tickets, open a donor and choose "Paper tickets" under Donation.')
+    ),
+    h('div', { class: 'card' },
+      h('h2', {}, 'Look up a ticket number'),
+      h('div', { class: 'lookup' }, num, checkBtn),
+      result
+    ),
+    h('div', { class: 'card' },
+      h('h2', {}, 'Recent paper activity'),
+      s.paperRecent.length ? h('ul', { class: 'list', id: 'paperRecent' }, s.paperRecent.map((e) => activityRow(e, onUndo)))
+        : h('p', { class: 'muted' }, 'No paper tickets yet.')
+    )
+  );
 }
 
 async function showStaffMember(code, flash) {
@@ -734,20 +912,25 @@ async function showStaffMember(code, flash) {
 function renderStaffMember(m, flash) {
   // Donation: count or list the items dropped off (1 item = 1 ticket).
   const items = donationInput(1);
+  const paper = paperChoice();
   const addBtn = h('button', { class: 'go full', id: 'addBtn' });
-  const addLabel = (n) => {
-    addBtn.textContent = n ? '+ Give ' + plural(n, 'ticket') : 'List the items to give tickets';
+  const addLabel = () => {
+    const n = items.count();
+    addBtn.textContent = n ? '+ Give ' + paper.label(n) : 'List the items to give tickets';
     addBtn.disabled = !n;
   };
-  addLabel(items.count());
+  addLabel();
   items.onChange(addLabel);
+  paper.onChange(addLabel);
   addBtn.addEventListener('click', () => busy(addBtn, async () => {
     const given = items.value();
     const n = Array.isArray(given) ? given.length : given;
-    await ensureServerUpToDate();
-    const updated = await call('addTickets', state.pin, state.staff, m.code, given, '');
-    renderStaffMember(updated, { ok: 'Gave ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
-  }).finally(() => addLabel(items.count())));
+    const paperValue = paper.value();
+    await ensureServerUpToDate(paperValue ? 4 : 2);
+    const updated = await call('addTickets', state.pin, state.staff, m.code, given, '', paperValue);
+    renderStaffMember(updated, { ok: paperValue ? paperFlash(updated, n)
+      : 'Gave ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
+  }).finally(addLabel));
 
   // Shop: spend tickets on goods.
   const count = stepper(1, 1);
@@ -765,10 +948,12 @@ function renderStaffMember(m, flash) {
     renderStaffMember(updated, { ok: 'Spent ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
   }).finally(() => spendLabel(count.get())));
 
-  const givePanel = h('div', {}, items.el, addBtn);
+  const givePanel = h('div', {}, items.el, paper.el, addBtn);
   const shopPanel = h('div', {},
     h('p', { class: 'muted' }, 'How many items are they taking?'),
-    count.el, note, redeemBtn);
+    count.el, note, redeemBtn,
+    h('p', { class: 'muted' }, 'Paying with paper tickets? ',
+      h('button', { class: 'link small', id: 'toPaperTab', onclick: () => { state.tab = 'paper'; go({}); } }, 'Collect them in the Paper tab'), '.'));
   const modeBtns = {};
   const setMode = (mode) => {
     state.mode = mode;
@@ -782,18 +967,10 @@ function renderStaffMember(m, flash) {
   );
   setMode(state.mode);
 
-  const onUndo = (entry, btn) => {
-    if (btn.dataset.armed !== '1') {
-      btn.dataset.armed = '1';
-      btn.textContent = 'Tap to confirm';
-      setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Undo'; }, 4000);
-      return;
-    }
-    busy(btn, async () => {
-      const updated = await call('undoEntry', state.pin, state.staff, entry.id);
-      renderStaffMember(updated, { ok: 'Undone. New balance: ' + updated.balance });
-    });
-  };
+  const onUndo = (entry, btn) => confirmUndo(btn, async () => {
+    const updated = await call('undoEntry', state.pin, state.staff, entry.id);
+    renderStaffMember(updated, { ok: 'Undone. New balance: ' + updated.balance });
+  });
 
   // Contact info: phone is required for reminder texts, so flag people who don't have one yet.
   const contact = contactFields('edit', m.phone || '', m.email || '');
@@ -833,6 +1010,7 @@ function renderStaffMember(m, flash) {
         h('div', { class: 'num', id: 'balance' }, m.balance),
         h('div', { class: 'lbl' }, m.balance === 1 ? 'ticket' : 'tickets')
       ),
+      paperLine(m.paper, 'handed out'),
       missingPhone,
       contactForm
     ),

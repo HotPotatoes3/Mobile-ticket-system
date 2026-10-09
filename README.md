@@ -1,7 +1,8 @@
 # Swap Shop Digital Tickets
 
-A phone-only ticket system for the **UCM YDSA Swap Shop**. It replaces paper tickets:
-1 donated item = 1 ticket, and tickets are spent on goods at the shop.
+A phone-first ticket system for the **UCM YDSA Swap Shop**: 1 donated item = 1 ticket, and
+tickets are spent on goods at the shop. Donors can also take **paper tickets** (from a raffle
+roll), and the app keeps track of every paper ticket handed out and collected.
 
 - **Volunteers** use one shared link on their own phones to give and spend tickets.
 - **Donors** get a personal ticket page with a QR code and a short code (like `HN7MK`)
@@ -37,6 +38,22 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
 4. Someone registered before phone numbers were required gets a red **No phone number on file**
    note on their page. Tap **Add one**. The **Edit** link next to their code fixes a typo the same way.
 
+**Paper tickets (optional, from a store-bought raffle roll)**
+- **Handing them out:** in the donation form (New donor, or a person's **Donation** tab), switch
+  **Give tickets as** to **Paper tickets**. Type the number printed on the first ticket you tear
+  off (optional, but it lets anyone look a ticket up later), then **+ Give N paper tickets**. The
+  app says exactly what to hand over, e.g. "Hand them 3 paper tickets (#1041–1043)". Paper
+  tickets never change the donor's phone balance; their page shows "+ 3 paper tickets" instead.
+  It always starts on **On their phone**, so paper is never given by accident. If the ticket
+  numbers overlap ones already handed out, the app refuses and says who has them (usually a typo).
+- **At checkout:** open the **Paper** tab → count the paper tickets they hand you → **− Collect N
+  paper tickets** → drop them in a box. Someone paying with both? Spend their phone tickets on
+  their page as usual, and collect the paper ones in the Paper tab (there's a link on the Shop
+  screen).
+- **Keeping track:** the Paper tab (and Stats) shows paper tickets **handed out**, **collected**,
+  and **still out there**, plus recent paper activity with Undo. **Look up a ticket number** tells
+  you who a ticket was given to, if the first ticket number was entered when it was handed out.
+
 **Shop day (Oct 23, 6–8pm, Pavilion Lawn)**
 1. The shopper shows their ticket page. A volunteer either scans the QR with their phone camera
    (this opens that person's account with the staff buttons) or searches by name or code.
@@ -53,15 +70,19 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
   description, and the volunteer who logged it. Quick-count donations only appear in the Ledger. Sort or filter it like any sheet (e.g. to count jackets). If a donation
   is undone, its items stay but the **Status** column says `Undone`.
 - **Ledger**: every ticket change (donations, spends, undos). Balances are calculated from this.
+  The **Paper** column counts paper tickets (+3 handed out, −4 collected) and **Ticket #s** has
+  the numbers handed out (e.g. `#1041–1043`). Paper collected at checkout has type `PAPER_IN` and
+  no person. These columns are added automatically to an older Ledger.
 - **Members**: everyone registered, with their code, phone, and email. For reminder texts, copy
   the **Phone** column. (Sheets from before phone was required get the **Email** column added
   automatically, and old emails in the Phone column are still recognized.)
-- **Balances**: live total of tickets per person.
+- **Balances**: live total of phone tickets per person (paper tickets aren't included).
 
 The Items tab is created automatically the first time items are logged. You don't need to re-run
 `setup`.
 
-**Stats tab:** number of people, tickets given, spent, and still unspent, plus recent activity.
+**Stats tab:** number of people, tickets given, spent, and still unspent, paper ticket totals,
+plus recent activity.
 
 ## One-time setup
 
