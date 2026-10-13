@@ -40,6 +40,8 @@ function fakeSheet(name) {
         },
         setValue(v) { return this.setValues([[v]]); },
         getValue: () => (rows[row - 1] || [])[col - 1] ?? '',
+        getFormula() { const v = this.getValue(); return typeof v === 'string' && v.startsWith('=') ? v : ''; },
+        setFormula(f) { return this.setValues([[f]]); },
       };
     },
   };

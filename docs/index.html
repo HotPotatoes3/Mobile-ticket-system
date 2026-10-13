@@ -129,6 +129,12 @@
     ul.items-given .muted { font-size: 13px; }
     .hidden { display: none !important; }
     .stats.three { grid-template-columns: 1fr 1fr 1fr; }
+    table.split { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    table.split th, table.split td { padding: 9px 6px; text-align: right; border-top: 1px solid var(--line); }
+    table.split thead th { border-top: 0; color: var(--muted); font-weight: 600; font-size: 14px; }
+    table.split tbody th { text-align: left; font-weight: 600; }
+    table.split td { font-size: 18px; }
+    table.split .all { font-weight: 800; }
     .stats.three .stat b { font-size: 24px; }
     .chg.paper { white-space: nowrap; min-width: 64px; }
     .paper-line { text-align: center; font-weight: 600; color: var(--green); margin-top: 4px; }
@@ -797,12 +803,16 @@ async function statsTab(body) {
     fill(body,
       h('div', { class: 'card' },
         h('h2', {}, 'Totals'),
+        s.split ? h('p', { class: 'muted', style: 'margin-top:-6px' }, 'Phone and paper tickets together.') : null,
         h('div', { class: 'stats' },
           stat(s.people, 'people'), stat(s.outstanding, 'tickets unspent'),
           stat(s.issued, 'tickets given'), stat(s.redeemed, 'tickets spent')
         )
       ),
-      s.paperGiven === undefined ? null : h('div', { class: 'card' },
+      s.split ? h('div', { class: 'card', id: 'splitCard' },
+        h('h2', {}, 'Phone vs paper'),
+        splitTable(s)
+      ) : s.paperGiven === undefined ? null : h('div', { class: 'card' },
         h('h2', {}, 'Paper tickets'),
         paperStats(s)
       ),
@@ -812,6 +822,19 @@ async function statsTab(body) {
       )
     );
   } catch (e) { body.replaceChildren(h('div', { class: 'notice err' }, errMsg(e))); }
+}
+
+/** Given / spent / unspent, each split into phone and paper (rows add up across). */
+function splitTable(s) {
+  const row = (label, k) => h('tr', {}, h('th', {}, label),
+    h('td', { class: 'all' }, s.split.phone[k] + s.split.paper[k]), h('td', {}, s.split.phone[k]), h('td', {}, s.split.paper[k]));
+  return [
+    h('table', { class: 'split' },
+      h('thead', {}, h('tr', {}, h('th', {}), h('th', { class: 'all' }, 'All'), h('th', {}, 'Phone'), h('th', {}, 'Paper'))),
+      h('tbody', {}, row('Given', 'given'), row('Spent', 'spent'), row('Unspent', 'unspent'))),
+    s.movedToPhone ? h('p', { class: 'muted' }, plural(s.movedToPhone, 'lost paper ticket') +
+      ' moved to phones: given as paper, then spent or unspent on a phone.') : null,
+  ];
 }
 
 function paperStats(s) {

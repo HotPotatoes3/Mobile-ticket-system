@@ -125,9 +125,12 @@ async function main() {
       [code, 'Ana R', 'Shoes', '', 'Maya', 'Undone'],
       [code, 'Ana R', 'Bag', '=SUM(A1)', 'Maya', 'Undone'],
     ]);
-    const ledgerIds = sheets.Ledger.slice(1).filter((r) => r[4] === 'DONATION').map((r) => r[7]);
+    assert.deepStrictEqual(sheets.Ledger[0],
+      ['Timestamp', 'Code', 'Name', 'Tickets', 'Phone', 'Paper', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes', 'Ticket #s']);
+    const ledgerIds = sheets.Ledger.slice(1).filter((r) => r[6] === 'DONATION').map((r) => r[9]);
     assert(itemRows.every((r) => ledgerIds.includes(r[5])), 'item rows must link to a Ledger donation');
-    assert.match(sheets.Ledger[1][5], /^Donated: Jacket, Shirt, Scarf$/);
+    assert.match(sheets.Ledger[1][7], /^Donated: Jacket, Shirt, Scarf$/);
+    assert.deepStrictEqual(sheets.Ledger[1].slice(3, 6), [3, 3, 0], 'phone donation: Tickets = Phone, no Paper');
 
     // Same phone number again -> credits the existing person, no duplicate.
     await staff.getByRole('button', { name: '← Back to search' }).click();
@@ -248,7 +251,7 @@ async function main() {
     assert.match(await err('createMember', '1234', 'x', 'Bad', '2095550111', 1, '', 'not-an-email'), /email doesn't look right/);
     assert.match(await err('updateContact', '1234', 'x', code, '', ''), /enter a phone number/);
 
-    assert.strictEqual((await rpc(holder, 'getConfig')).result.apiVersion, 5);
+    assert.strictEqual((await rpc(holder, 'getConfig')).result.apiVersion, 6);
 
     // Quick count: just a number of tickets, no item details. The phone remembers the choice.
     await staff.goto(BASE + '?m=' + code);
@@ -273,7 +276,7 @@ async function main() {
     assert.strictEqual(await balance(staff), 0);
     const after = await staff.evaluate(() => fetch('/__sheets').then((r) => r.json()));
     assert.strictEqual(after.Items.length - 1, 7, 'quick count must not add Items rows');
-    assert.match(after.Ledger[after.Ledger.length - 1][5], /^Donated 3 item\(s\)$/);
+    assert.match(after.Ledger[after.Ledger.length - 1][7], /^Donated 3 item\(s\)$/);
 
     // Paper tickets: handed out against a donor (never touching their phone balance), with ticket numbers.
     const boCode = new URL(staff.url()).searchParams.get('m');
@@ -338,9 +341,20 @@ async function main() {
     await staff.locator('#paperRecent li').first().getByRole('button', { name: 'Tap to confirm' }).click();
     await staff.locator('#flash', { hasText: 'Undone.' }).waitFor();
     assert.deepStrictEqual(await paperNums(), ['5', '0', '5']);
+    // Stats: totals count phone and paper together; the table splits them (rows add up).
     await staff.getByRole('button', { name: 'Stats' }).click();
-    await staff.getByRole('heading', { name: 'Paper tickets' }).waitFor();
-    assert.deepStrictEqual(await paperNums(), ['5', '0', '5']);
+    await staff.getByRole('heading', { name: 'Phone vs paper' }).waitFor();
+    const split = (await staff.locator('#splitCard td').allInnerTexts()).map(Number);
+    const st = (await rpc(staff, 'getStats', '1234')).result;
+    assert.deepStrictEqual(split, [
+      st.issued, st.split.phone.given, 5,
+      st.redeemed, st.split.phone.spent, 0,
+      st.outstanding, st.split.phone.unspent, 5]);
+    for (let i = 0; i < 9; i += 3) assert.strictEqual(split[i], split[i + 1] + split[i + 2], 'row must add up');
+    const totals = (await staff.locator('.stats:not(.three) .stat b').allInnerTexts()).map(Number);
+    assert.deepStrictEqual(totals.slice(1), [st.outstanding, st.issued, st.redeemed]);
+    assert.strictEqual(st.issued, st.split.phone.given + 5, 'paper counts as tickets given');
+    await shot(staff, '8-stats-split');
     await staff.getByRole('button', { name: 'Find' }).click();
     await staff.fill('#search', 'Bo T');
     await staff.locator('.list li', { hasText: '+3 paper' }).waitFor();
@@ -350,10 +364,9 @@ async function main() {
     assert.strictEqual(await holder.locator('#paperLine').innerText(), '+ 3 paper tickets given to you — bring them to the shop');
     await holder.getByText('Lost them? A volunteer can move them onto this page.').waitFor();
     const sheetsNow = await staff.evaluate(() => fetch('/__sheets').then((r) => r.json()));
-    assert.deepStrictEqual(sheetsNow.Ledger[0].slice(-2), ['Paper', 'Ticket #s']);
-    const collectRow = sheetsNow.Ledger.find((r) => r[4] === 'PAPER_IN');
-    assert.deepStrictEqual([collectRow[1], collectRow[3], collectRow[9]], ['', 0, -4]);
-    assert(sheetsNow.Ledger.some((r) => r[1] === boCode && r[3] === 0 && r[9] === 3 && r[10] === '#001041–001043'));
+    const collectRow = sheetsNow.Ledger.find((r) => r[6] === 'PAPER_IN');
+    assert.deepStrictEqual([collectRow[1], ...collectRow.slice(3, 6)], ['', -4, 0, -4], 'collected: Tickets -4, Phone 0, Paper -4');
+    assert(sheetsNow.Ledger.some((r) => r[1] === boCode && r[3] === 3 && r[4] === 0 && r[5] === 3 && r[11] === '#001041–001043'));
     assert.match(await err('collectPaper', '1234', 'x', 0, ''), /whole number/);
     assert.match(await err('collectPaper', '9999', 'x', 1, ''), /Wrong staff PIN/);
     assert.match(await err('addTickets', '1234', 'x', boCode, 1, '', { first: '12-3' }), /digits only/);
@@ -383,6 +396,14 @@ async function main() {
     await staff.locator('#checkBtn').click();
     await staff.locator('#lostWarning', { hasText: 'Bo T reported 2 paper tickets lost' }).waitFor();
     assert(!/null/.test(await staff.locator('#checkResult').innerText()), 'stray "null" in the lookup');
+    // Moving lost paper to a phone doesn't change the ticket totals, only the split.
+    const st2 = (await rpc(staff, 'getStats', '1234')).result;
+    assert.deepStrictEqual([st2.issued, st2.outstanding], [st.issued, st.outstanding]);
+    assert.deepStrictEqual([st2.split.paper.unspent, st2.split.phone.unspent, st2.movedToPhone], [3, st.split.phone.unspent + 2, 2]);
+    const lostRow = (await staff.evaluate(() => fetch('/__sheets').then((r) => r.json()))).Ledger.find((r) => r[6] === 'PAPER_LOST');
+    assert.deepStrictEqual(lostRow.slice(3, 6), [0, 2, -2]);
+    await staff.getByRole('button', { name: 'Stats' }).click();
+    await staff.locator('#splitCard', { hasText: '2 lost paper tickets moved to phones' }).waitFor();
 
     // A Members tab from before phone was required: one "Contact" column that may hold an email.
     const old = createBackend();
@@ -398,15 +419,37 @@ async function main() {
     old.ctx.createMember('1234', 'x', 'Kylie W', '2095550177', 2, '', 'KW@ucmerced.edu');
     assert.deepStrictEqual(old.sheets.Members.rows[2], ['BBBBB', 'Old Email', '(209) 555-0177', '', 'x', 'kw@ucmerced.edu']);
     assert.strictEqual(old.sheets.Members.rows.length, 4, 'matched by email, no duplicate');
-    // A Ledger from before paper tickets gets the two new columns; its rows still count.
+    // A Ledger from before paper tickets (one "Change" column) is rewritten as Tickets / Phone / Paper.
+    const NEW_LEDGER = ['Timestamp', 'Code', 'Name', 'Tickets', 'Phone', 'Paper', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes', 'Ticket #s'];
     old.sheets.Ledger.rows.splice(0, Infinity,
       ['Timestamp', 'Code', 'Name', 'Change', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes'],
-      ['', 'AAAAA', 'Old Phone', 2, 'DONATION', 'Donated 2 item(s)', 'x', 'e1', '']);
+      ['', 'AAAAA', 'Old Phone', 2, 'DONATION', '=Donated 2 item(s)', 'x', 'e1', '']);
+    old.sheets.Balances.rows.splice(0, Infinity, ['=QUERY(Ledger!B:D, "select B, C, sum(D) group by B, C", 1)']);
     assert.strictEqual(old.ctx.getWallet('AAAAA').balance, 2);
+    assert.deepStrictEqual(old.sheets.Ledger.rows[0], NEW_LEDGER);
+    assert.deepStrictEqual(old.sheets.Ledger.rows[1], ['', 'AAAAA', 'Old Phone', 2, 2, 0, 'DONATION', '=Donated 2 item(s)', 'x', 'e1', '', '']);
+    assert.match(old.sheets.Balances.rows[0][0], /^=QUERY\(Ledger!B:F, "select B, C, sum\(E\), sum\(F\)/);
     old.ctx.addTickets('1234', 'x', 'AAAAA', 1, '', { first: '7' });
-    assert.deepStrictEqual(old.sheets.Ledger.rows[0].slice(-2), ['Paper', 'Ticket #s']);
     assert.deepStrictEqual([old.ctx.getWallet('AAAAA').balance, old.ctx.getWallet('AAAAA').paper], [2, 1]);
     assert.strictEqual(old.ctx.checkPaperTicket('1234', '#7').entry.code, 'AAAAA');
+    // A Ledger written by the paper-ticket versions (Change + Paper columns) keeps every kind of row.
+    const v5 = createBackend();
+    v5.sheets.Ledger.rows.splice(0, Infinity,
+      ['Timestamp', 'Code', 'Name', 'Change', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes', 'Paper', 'Ticket #s'],
+      ['', 'AAAAA', 'A', 4, 'DONATION', 'n', 'x', 'p1', '', 0, ''],
+      ['', 'BBBBB', 'B', 0, 'DONATION', 'n', 'x', 'p2', '', 3, '#1041–1043'],
+      ['', '', '', 0, 'PAPER_IN', 'n', 'x', 'p3', '', -1, ''],
+      ['', 'BBBBB', 'B', 1, 'PAPER_LOST', 'n', 'x', 'p4', '', -1, ''],
+      ['', 'AAAAA', 'A', -2, 'REDEEM', 'n', 'x', 'p5', '', 0, '']);
+    v5.sheets.Members.rows.push(['AAAAA', 'A', '(209) 555-0100', '', 'x', ''], ['BBBBB', 'B', '(209) 555-0101', '', 'x', '']);
+    const v5stats = v5.ctx.getStats('1234');
+    assert.deepStrictEqual(v5.sheets.Ledger.rows.slice(1).map((r) => [r[1], ...r.slice(3, 7), r[11]]), [
+      ['AAAAA', 4, 4, 0, 'DONATION', ''], ['BBBBB', 3, 0, 3, 'DONATION', '#1041–1043'], ['', -1, 0, -1, 'PAPER_IN', ''],
+      ['BBBBB', 0, 1, -1, 'PAPER_LOST', ''], ['AAAAA', -2, -2, 0, 'REDEEM', '']]);
+    assert.deepStrictEqual([v5stats.issued, v5stats.redeemed, v5stats.outstanding], [7, 3, 4]);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(v5stats.split)), { phone: { given: 4, spent: 2, unspent: 3 }, paper: { given: 3, spent: 1, unspent: 1 } });
+    assert.deepStrictEqual([v5.ctx.getWallet('BBBBB').balance, v5.ctx.getWallet('BBBBB').paper], [1, 2]);
+    assert.strictEqual(v5.ctx.checkPaperTicket('1234', '1042').lost, 1);
 
     // An out-of-date server (before paper tickets) must refuse paper rather than give phone tickets.
     const v3 = await newPage();

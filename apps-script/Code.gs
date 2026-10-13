@@ -3,15 +3,16 @@
  *
  * Storage is the Google Sheet this script is bound to:
  *   Members: one row per person (their ticket code, name, phone, email).
- *   Ledger:  one row per ticket change. A person's balance is the sum of
- *            their Ledger "Change" column, so the Sheet is the source of truth
- *            and doubles as an audit log.
+ *   Ledger:  one row per ticket change. "Tickets" counts every ticket, phone
+ *            and paper alike; "Phone" and "Paper" split it by kind. A person's
+ *            balance is the sum of their "Phone" column, so the Sheet is the
+ *            source of truth and doubles as an audit log.
  *   Items:   one row per donated item (name + description), linked to the
  *            Ledger donation that gave the tickets for it.
  *
  * Paper tickets (from a raffle roll) are tracked in the Ledger's "Paper" column:
  * +N when handed to a donor (with the ticket numbers, if entered), -N when
- * collected at checkout. They never change anyone's phone balance, except
+ * collected at checkout (a row with no person). They never change anyone's phone balance, except
  * when a donor loses them: replaceLostPaper moves them onto their phone.
  *
  * The ticket page itself is hosted on GitHub Pages (docs/) and calls doPost
@@ -20,7 +21,7 @@
 
 var EVENT_NAME = 'UCM YDSA Swap Shop';
 var PAGE_URL = 'https://hotpotatoes3.github.io/Mobile-ticket-system/'; // the GitHub Pages site
-var API_VERSION = 5; // 2 = itemized donations, 3 = phone required + email, 4 = paper tickets, 5 = lost paper
+var API_VERSION = 6; // 2 = itemized, 3 = phone required + email, 4 = paper, 5 = lost paper, 6 = Tickets/Phone/Paper ledger
 var MAX_TICKETS_PER_ENTRY = 50; // guards against fat-finger typos
 var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var CODE_LENGTH = 5;
@@ -29,12 +30,18 @@ var MEMBERS_SHEET = 'Members';
 var LEDGER_SHEET = 'Ledger';
 var ITEMS_SHEET = 'Items';
 var MEMBERS_HEADER = ['Code', 'Name', 'Phone', 'Created', 'Created by', 'Email'];
-var LEDGER_HEADER = ['Timestamp', 'Code', 'Name', 'Change', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes', 'Paper', 'Ticket #s'];
+var LEDGER_HEADER = ['Timestamp', 'Code', 'Name', 'Tickets', 'Phone', 'Paper', 'Type', 'Note', 'Staff', 'Entry ID', 'Undoes', 'Ticket #s'];
 var ITEMS_HEADER = ['Timestamp', 'Code', 'Donor', 'Item', 'Description', 'Entry ID', 'Staff', 'Status'];
 
 // Column indexes (0-based) into the rows above.
 var M = { CODE: 0, NAME: 1, PHONE: 2, CREATED: 3, CREATED_BY: 4, EMAIL: 5 };
-var L = { TS: 0, CODE: 1, NAME: 2, CHANGE: 3, TYPE: 4, NOTE: 5, STAFF: 6, ID: 7, UNDOES: 8, PAPER: 9, SERIALS: 10 };
+var L = {
+  TS: 0, CODE: 1, NAME: 2, TICKETS: 3, PHONE: 4, PAPER: 5, TYPE: 6, NOTE: 7, STAFF: 8, ID: 9, UNDOES: 10, SERIALS: 11
+};
+var BALANCES_SHEET = 'Balances';
+// Live per-person totals, handy to print as a paper backup before the shop opens.
+var BALANCES_FORMULA = '=QUERY(Ledger!B:F, "select B, C, sum(E), sum(F) where B is not null group by B, C ' +
+  'order by C label B \'Code\', C \'Name\', sum(E) \'Phone tickets\', sum(F) \'Paper tickets given\'", 1)';
 var I = { TS: 0, CODE: 1, DONOR: 2, ITEM: 3, DESC: 4, ENTRY: 5, STAFF: 6, STATUS: 7 };
 
 // ---------------------------------------------------------------------------
@@ -91,13 +98,7 @@ function setup() {
   getSheet_(LEDGER_SHEET, LEDGER_HEADER);
   getSheet_(ITEMS_SHEET, ITEMS_HEADER);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss.getSheetByName('Balances')) {
-    // Live per-person totals, handy to print as a paper backup before the shop opens.
-    ss.insertSheet('Balances').appendRow([
-      '=QUERY(Ledger!B:D, "select B, C, sum(D) where B is not null group by B, C order by C ' +
-        'label B \'Code\', C \'Name\', sum(D) \'Tickets\'", 1)'
-    ]);
-  }
+  if (!ss.getSheetByName(BALANCES_SHEET)) ss.insertSheet(BALANCES_SHEET).appendRow([BALANCES_FORMULA]);
   if (!PropertiesService.getScriptProperties().getProperty('STAFF_PIN')) {
     Logger.log('Remember to set the STAFF_PIN script property (Project Settings > Script properties).');
   }
@@ -282,28 +283,40 @@ function undoEntry(pin, staff, entryId) {
   });
 }
 
+/**
+ * Totals count every ticket, phone and paper alike; `split` breaks each one down
+ * by kind. Lost paper moved to a phone stays "given" as paper and shows up in the
+ * phone columns once it's spent or unspent there, so `movedToPhone` explains the gap.
+ */
 function getStats(pin) {
   checkPin_(pin);
   var data = loadData_();
-  var issued = 0, redeemed = 0, paperGiven = 0, paperCollected = 0, paperLost = 0;
+  var split = { phone: { given: 0, spent: 0, unspent: 0 }, paper: { given: 0, spent: 0, unspent: 0 } };
+  var moved = 0;
   // An undone entry and its UNDO cancel out, so both are left out of the totals.
   data.entries.forEach(function (e) {
     if (e.undone || e.type === 'UNDO') return;
-    if (e.change > 0) issued += e.change;
-    else redeemed -= e.change;
-    if (e.paper > 0) paperGiven += e.paper;
-    else if (e.type === 'PAPER_LOST') paperLost -= e.paper;
-    else paperCollected -= e.paper;
+    if (e.type === 'PAPER_LOST') { moved -= e.paper; return; }
+    if (e.change > 0) split.phone.given += e.change;
+    else split.phone.spent -= e.change;
+    if (e.paper > 0) split.paper.given += e.paper;
+    else split.paper.spent -= e.paper;
   });
+  split.phone.unspent = split.phone.given + moved - split.phone.spent;
+  split.paper.unspent = split.paper.given - moved - split.paper.spent;
+  var issued = split.phone.given + split.paper.given;
+  var redeemed = split.phone.spent + split.paper.spent;
   return {
     people: data.members.length,
     issued: issued,
     redeemed: redeemed,
     outstanding: issued - redeemed,
-    paperGiven: paperGiven,
-    paperCollected: paperCollected,
-    paperLost: paperLost,
-    paperOut: paperGiven - paperCollected - paperLost,
+    split: split,
+    movedToPhone: moved,
+    paperGiven: split.paper.given,
+    paperCollected: split.paper.spent,
+    paperLost: moved,
+    paperOut: split.paper.unspent,
     recent: data.entries.slice(-15).reverse().map(staffEntry_),
     paperRecent: data.entries.filter(function (e) { return e.paper; }).slice(-15).reverse().map(staffEntry_)
   };
@@ -391,6 +404,8 @@ function getSheet_(name, header) {
     sheet = ss.insertSheet(name);
     sheet.appendRow(header);
     sheet.setFrozenRows(1);
+  } else if (name === LEDGER_SHEET && String(sheet.getRange(1, 4).getValue()) === 'Change') {
+    migrateLedger_(sheet);
   } else if (sheet.getLastColumn() < header.length) {
     // Sheet made by an older version: add the new columns' headers.
     var have = sheet.getLastColumn();
@@ -400,6 +415,30 @@ function getSheet_(name, header) {
     }
   }
   return sheet;
+}
+
+/**
+ * Ledgers from before v6 had one "Change" column (phone tickets) with paper in
+ * later columns. Rewrites every row as Tickets / Phone / Paper in one go, and
+ * points the Balances formula at the new columns. Reads header and rows in a
+ * single call so two requests migrating at once both write the same result.
+ */
+function migrateLedger_(sheet) {
+  var lastRow = sheet.getLastRow();
+  var all = sheet.getRange(1, 1, lastRow, Math.max(sheet.getLastColumn(), 11)).getValues();
+  if (String(all[0][3]) !== 'Change') return;
+  // Old layout: Timestamp, Code, Name, Change, Type, Note, Staff, Entry ID, Undoes, Paper, Ticket #s
+  var rows = all.slice(1).map(function (r) {
+    if (r.every(function (v) { return v === '' || v == null; })) return LEDGER_HEADER.map(function () { return ''; });
+    var phone = Number(r[3]) || 0;
+    var paper = Number(r[9]) || 0;
+    return [r[0], r[1], r[2], phone + paper, phone, paper, r[4], r[5], r[6], r[7], r[8], r[10]].map(sheetSafe_);
+  });
+  sheet.getRange(1, 1, rows.length + 1, LEDGER_HEADER.length).setValues([LEDGER_HEADER].concat(rows));
+  var balances = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(BALANCES_SHEET);
+  if (balances && /Ledger!B:D/.test(balances.getRange(1, 1).getFormula())) {
+    balances.getRange(1, 1).setFormula(BALANCES_FORMULA);
+  }
 }
 
 function readRows_(name, header) {
@@ -446,7 +485,7 @@ function loadData_() {
         ts: r[L.TS] instanceof Date ? r[L.TS].toISOString() : String(r[L.TS]),
         code: String(r[L.CODE]).toUpperCase(),
         name: String(r[L.NAME]),
-        change: Number(r[L.CHANGE]) || 0,
+        change: Number(r[L.PHONE]) || 0, // phone tickets; paper is separate
         type: String(r[L.TYPE]),
         note: String(r[L.NOTE]),
         staff: String(r[L.STAFF]),
@@ -472,12 +511,13 @@ function loadData_() {
   };
 }
 
-/** `member` is null for paper collected at checkout. */
+/** `change` is phone tickets, `paper` paper tickets. `member` is null for paper collected at checkout. */
 function appendEntry_(member, change, type, note, staff, undoes, paper, serials) {
   var id = Utilities.getUuid().slice(0, 8);
+  paper = paper || 0;
   getSheet_(LEDGER_SHEET, LEDGER_HEADER).appendRow(
-    [new Date(), member ? member.code : '', member ? member.name : '', change, type, cleanText_(note, 120),
-      cleanText_(staff, 40), id, undoes || '', paper || 0, serials || ''].map(sheetSafe_)
+    [new Date(), member ? member.code : '', member ? member.name : '', change + paper, change, paper, type,
+      cleanText_(note, 120), cleanText_(staff, 40), id, undoes || '', serials || ''].map(sheetSafe_)
   );
   return id;
 }

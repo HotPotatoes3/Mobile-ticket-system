@@ -75,20 +75,25 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
 - **Items**: one row per item logged with **List items**: when, who donated it, item name,
   description, and the volunteer who logged it. Quick-count donations only appear in the Ledger. Sort or filter it like any sheet (e.g. to count jackets). If a donation
   is undone, its items stay but the **Status** column says `Undone`.
-- **Ledger**: every ticket change (donations, spends, undos). Balances are calculated from this.
-  The **Paper** column counts paper tickets (+3 handed out, −4 collected) and **Ticket #s** has
-  the numbers handed out (e.g. `#1041–1043`). Paper collected at checkout has type `PAPER_IN` and
-  no person. These columns are added automatically to an older Ledger.
+- **Ledger**: every ticket change (donations, spends, undos, paper handed out or collected).
+  **Tickets** counts every ticket, phone and paper alike, and **Phone** and **Paper** split it by
+  kind: a phone donation of 3 is `3 · 3 · 0`, 3 paper tickets handed out is `3 · 0 · 3`, and 4
+  paper tickets collected at checkout is `−4 · 0 · −4` (type `PAPER_IN`, no person). Lost paper
+  moved to a phone is `0 · +2 · −2`. **Ticket #s** has the paper numbers handed out (e.g.
+  `#1041–1043`). Phone balances are the sum of each person's **Phone** column. A Ledger from an
+  older version is rearranged into these columns automatically the first time the new `Code.gs`
+  runs, keeping every row.
 - **Members**: everyone registered, with their code, phone, and email. For reminder texts, copy
   the **Phone** column. (Sheets from before phone was required get the **Email** column added
   automatically, and old emails in the Phone column are still recognized.)
-- **Balances**: live total of phone tickets per person (paper tickets aren't included).
+- **Balances**: live totals per person: **Phone tickets** (their balance) and **Paper tickets
+  given**. There's no combined total per person, because collected paper isn't tied to anyone.
 
 The Items tab is created automatically the first time items are logged. You don't need to re-run
 `setup`.
 
-**Stats tab:** number of people, tickets given, spent, and still unspent, paper ticket totals,
-plus recent activity.
+**Stats tab:** number of people and tickets given, spent, and still unspent, counting phone and
+paper tickets together. **Phone vs paper** splits each of those three by kind, plus recent activity.
 
 ## One-time setup
 
@@ -138,11 +143,11 @@ people on to the ticket page.
 - **Who can see what:** anyone with a ticket link sees only that person's name, balance, and history.
   Phone numbers and emails are visible only to logged-in volunteers (and in the Sheet).
   The staff PIN is checked on the server for every staff action.
-- **The Sheet is the source of truth.** A person's balance is the sum of their rows in `Ledger`.
+- **The Sheet is the source of truth.** A person's balance is the sum of their **Phone** column in `Ledger`.
   Don't edit or delete Ledger rows by hand during the event. Use the app's Undo instead.
   Organizers can still view, sort, filter, or download the Sheet any time.
 - **Backup for bad Wi-Fi on shop day:** shortly before the shop opens, print the **Balances**
-  tab (everyone's name, code, and current tickets). If the app goes down, cross names off on paper
+  tab (everyone's name, code, phone tickets, and paper tickets given). If the app goes down, cross names off on paper
   and enter them later.
 - **Change the PIN** by editing the `STAFF_PIN` script property. Everyone has to log in again.
 - **Several volunteers at once** is fine: writes are locked so two phones can't spend the same tickets.
