@@ -5,14 +5,16 @@
  *   Members: one row per person (their ticket code, name, phone, email).
  *   Ledger:  one row per ticket change. "Tickets" counts every ticket, phone
  *            and paper alike; "Phone" and "Paper" split it by kind. A person's
- *            balance is the sum of their "Phone" column, so the Sheet is the
+ *            total is the sum of their "Tickets" column (their phone balance
+ *            plus the paper tickets they still hold), so the Sheet is the
  *            source of truth and doubles as an audit log.
  *   Items:   one row per donated item (name + description), linked to the
  *            Ledger donation that gave the tickets for it.
  *
  * Paper tickets (from a raffle roll) are tracked in the Ledger's "Paper" column:
  * +N when handed to a donor (with the ticket numbers, if entered), -N when
- * collected at checkout (a row with no person). They never change anyone's phone balance, except
+ * collected at checkout: from that donor, or with no person when someone else
+ * hands them in. They never change anyone's phone balance, except
  * when a donor loses them: replaceLostPaper moves them onto their phone.
  *
  * The ticket page itself is hosted on GitHub Pages (docs/) and calls doPost
@@ -21,7 +23,7 @@
 
 var EVENT_NAME = 'UCM YDSA Swap Shop';
 var PAGE_URL = 'https://hotpotatoes3.github.io/Mobile-ticket-system/'; // the GitHub Pages site
-var API_VERSION = 6; // 2 = itemized, 3 = phone required + email, 4 = paper, 5 = lost paper, 6 = Tickets/Phone/Paper ledger
+var API_VERSION = 7; // 2 = itemized, 3 = phone + email, 4 = paper, 5 = lost paper, 6 = Tickets/Phone/Paper, 7 = paper per person
 var MAX_TICKETS_PER_ENTRY = 50; // guards against fat-finger typos
 var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var CODE_LENGTH = 5;
@@ -40,8 +42,9 @@ var L = {
 };
 var BALANCES_SHEET = 'Balances';
 // Live per-person totals, handy to print as a paper backup before the shop opens.
-var BALANCES_FORMULA = '=QUERY(Ledger!B:F, "select B, C, sum(E), sum(F) where B is not null group by B, C ' +
-  'order by C label B \'Code\', C \'Name\', sum(E) \'Phone tickets\', sum(F) \'Paper tickets given\'", 1)';
+var BALANCES_FORMULA = '=QUERY(Ledger!B:F, "select B, C, sum(D), sum(E), sum(F) where B is not null group by B, C ' +
+  'order by C label B \'Code\', C \'Name\', sum(D) \'Total tickets\', sum(E) \'Phone tickets\', ' +
+  'sum(F) \'Paper tickets\'", 1)';
 var I = { TS: 0, CODE: 1, DONOR: 2, ITEM: 3, DESC: 4, ENTRY: 5, STAFF: 6, STATUS: 7 };
 
 // ---------------------------------------------------------------------------
@@ -99,6 +102,7 @@ function setup() {
   getSheet_(ITEMS_SHEET, ITEMS_HEADER);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss.getSheetByName(BALANCES_SHEET)) ss.insertSheet(BALANCES_SHEET).appendRow([BALANCES_FORMULA]);
+  updateBalancesFormula_();
   if (!PropertiesService.getScriptProperties().getProperty('STAFF_PIN')) {
     Logger.log('Remember to set the STAFF_PIN script property (Project Settings > Script properties).');
   }
@@ -275,7 +279,7 @@ function undoEntry(pin, staff, entryId) {
       throw new Error('Undoing this would make the balance negative (tickets were already spent).');
     }
     if (member && (data.paperByCode[member.code] || 0) - entry.paper < 0) {
-      throw new Error('Some of these paper tickets were reported lost. Undo that entry first.');
+      throw new Error('Some of these paper tickets were already spent or reported lost. Undo that entry first.');
     }
     appendEntry_(member, reversal, 'UNDO', 'Undo: ' + entry.note, staff, entryId, -entry.paper, '');
     if (entry.items.length) markItemsUndone_(entryId);
@@ -290,6 +294,7 @@ function undoEntry(pin, staff, entryId) {
  */
 function getStats(pin) {
   checkPin_(pin);
+  updateBalancesFormula_();
   var data = loadData_();
   var split = { phone: { given: 0, spent: 0, unspent: 0 }, paper: { given: 0, spent: 0, unspent: 0 } };
   var moved = 0;
@@ -322,15 +327,30 @@ function getStats(pin) {
   };
 }
 
-/** At checkout: paper tickets handed in (from anyone). Returns the updated stats. */
-function collectPaper(pin, staff, count, note) {
+/**
+ * At checkout: paper tickets handed in. With a `code`, they come off that donor's
+ * paper count and their page is returned; without one (someone else's paper,
+ * from the Paper tab) they're logged with no person and the stats are returned.
+ */
+function collectPaper(pin, staff, count, note, code) {
   checkPin_(pin);
   validateCount_(count);
   return withLock_(function () {
     var n = Number(count);
-    appendEntry_(null, 0, 'PAPER_IN', cleanText_(note, 120) || 'Collected ' + n + ' paper ticket' + (n === 1 ? '' : 's'),
-      staff, '', -n, '');
-    return getStats(pin);
+    var member = null;
+    if (code) {
+      var data = loadData_();
+      member = requireMember_(data, code);
+      var held = data.paperByCode[member.code] || 0;
+      if (n > held) {
+        throw new Error(member.name + ' only has ' + held + ' paper ticket' + (held === 1 ? '' : 's') +
+          ' on record. Collect any others in the Paper tab.');
+      }
+    }
+    var plural = n === 1 ? '' : 's';
+    appendEntry_(member, 0, 'PAPER_IN', cleanText_(note, 120) ||
+      (member ? 'Paid with ' + n + ' paper ticket' + plural : 'Collected ' + n + ' paper ticket' + plural), staff, '', -n, '');
+    return member ? getMemberForStaff(pin, member.code) : getStats(pin);
   });
 }
 
@@ -435,10 +455,16 @@ function migrateLedger_(sheet) {
     return [r[0], r[1], r[2], phone + paper, phone, paper, r[4], r[5], r[6], r[7], r[8], r[10]].map(sheetSafe_);
   });
   sheet.getRange(1, 1, rows.length + 1, LEDGER_HEADER.length).setValues([LEDGER_HEADER].concat(rows));
+  updateBalancesFormula_();
+}
+
+/** Points an older Balances formula (one made by an earlier version of this script) at the current columns. */
+function updateBalancesFormula_() {
   var balances = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(BALANCES_SHEET);
-  if (balances && /Ledger!B:D/.test(balances.getRange(1, 1).getFormula())) {
-    balances.getRange(1, 1).setFormula(BALANCES_FORMULA);
-  }
+  if (!balances) return;
+  var cell = balances.getRange(1, 1);
+  var formula = cell.getFormula();
+  if (formula !== BALANCES_FORMULA && /^=QUERY\(Ledger!/.test(formula)) cell.setFormula(BALANCES_FORMULA);
 }
 
 function readRows_(name, header) {

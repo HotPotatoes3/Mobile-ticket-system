@@ -43,7 +43,7 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
   **Give tickets as** to **Paper tickets**. Type the number printed on the first ticket you tear
   off (optional, but it lets anyone look a ticket up later), then **+ Give N paper tickets**. The
   app says exactly what to hand over, e.g. "Hand them 3 paper tickets (#1041–1043)". Paper
-  tickets never change the donor's phone balance; their page shows "+ 3 paper tickets" instead.
+  tickets count in the donor's total, which shows the split underneath (e.g. "2 on phone · 3 paper").
   It always starts on **On their phone**, so paper is never given by accident. If the ticket
   numbers overlap ones already handed out, the app refuses and says who has them (usually a typo).
   The QR code still pops up for paper donors: have them scan and bookmark it anyway.
@@ -52,10 +52,10 @@ uses anyone's Google sign-in, so it works no matter how many Google accounts a p
   QR like anyone else. Looking up one of their ticket numbers afterwards warns that they reported
   paper lost, so a found ticket isn't spent twice. (The app can't tell which paper tickets were
   already spent, since collecting paper isn't tied to a person, so ask.)
-- **At checkout:** open the **Paper** tab → count the paper tickets they hand you → **− Collect N
-  paper tickets** → drop them in a box. Someone paying with both? Spend their phone tickets on
-  their page as usual, and collect the paper ones in the Paper tab (there's a link on the Shop
-  screen).
+- **At checkout:** open the shopper's page → **Shop** → set the count → **− Collect N paper
+  tickets** (it appears for anyone holding paper, under **− Spend N phone tickets**) → drop the
+  paper in a box. That takes them off the shopper's total. Paper tickets the shopper wasn't given
+  (e.g. from a friend): **Paper** tab → **− Collect N paper tickets**, logged with no person.
 - **Keeping track:** the Paper tab (and Stats) shows paper tickets **handed out**, **collected**,
   and **still out there** (lost ones moved to phones are listed separately), plus recent paper activity with Undo. **Look up a ticket number** tells
   you who a ticket was given to, if the first ticket number was entered when it was handed out.
@@ -80,14 +80,15 @@ Sheet and a reversing row is added, so nothing is ever silently deleted.
   kind: a phone donation of 3 is `3 · 3 · 0`, 3 paper tickets handed out is `3 · 0 · 3`, and 4
   paper tickets collected at checkout is `−4 · 0 · −4` (type `PAPER_IN`, no person). Lost paper
   moved to a phone is `0 · +2 · −2`. **Ticket #s** has the paper numbers handed out (e.g.
-  `#1041–1043`). Phone balances are the sum of each person's **Phone** column. A Ledger from an
+  `#1041–1043`). A person's total is the sum of their **Tickets** column (phone balance plus paper they still hold). A Ledger from an
   older version is rearranged into these columns automatically the first time the new `Code.gs`
   runs, keeping every row.
 - **Members**: everyone registered, with their code, phone, and email. For reminder texts, copy
   the **Phone** column. (Sheets from before phone was required get the **Email** column added
   automatically, and old emails in the Phone column are still recognized.)
-- **Balances**: live totals per person: **Phone tickets** (their balance) and **Paper tickets
-  given**. There's no combined total per person, because collected paper isn't tied to anyone.
+- **Balances**: live totals per person: **Total tickets**, **Phone tickets**, and **Paper tickets**
+  (paper they still hold). Paper collected in the Paper tab isn't tied to anyone, so collect a
+  donor's own paper from their page to keep their total right.
 
 The Items tab is created automatically the first time items are logged. You don't need to re-run
 `setup`.
@@ -147,7 +148,7 @@ people on to the ticket page.
   Don't edit or delete Ledger rows by hand during the event. Use the app's Undo instead.
   Organizers can still view, sort, filter, or download the Sheet any time.
 - **Backup for bad Wi-Fi on shop day:** shortly before the shop opens, print the **Balances**
-  tab (everyone's name, code, phone tickets, and paper tickets given). If the app goes down, cross names off on paper
+  tab (everyone's name, code, and total, phone, and paper tickets). If the app goes down, cross names off on paper
   and enter them later.
 - **Change the PIN** by editing the `STAFF_PIN` script property. Everyone has to log in again.
 - **Several volunteers at once** is fine: writes are locked so two phones can't spend the same tickets.

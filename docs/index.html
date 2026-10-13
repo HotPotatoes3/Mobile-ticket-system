@@ -325,8 +325,16 @@ function confirmUndo(btn, fn) {
   busy(btn, fn);
 }
 
-function paperLine(n, text) {
-  return n > 0 ? h('div', { class: 'paper-line', id: 'paperLine' }, '+ ' + plural(n, 'paper ticket') + ' ' + text) : null;
+/** Everyone's count is phone tickets plus the paper tickets they still hold. */
+function totalTickets(m) { return m.balance + (m.paper || 0); }
+
+/** "2 on phone · 3 paper", shown under a total that includes paper. */
+function splitText(m) {
+  return (m.balance ? m.balance + ' on phone · ' : '') + m.paper + ' paper';
+}
+
+function paperLine(m, extra) {
+  return m.paper > 0 ? h('div', { class: 'paper-line', id: 'paperLine' }, splitText(m), extra || '') : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -396,10 +404,10 @@ async function showWallet(code) {
       h('div', { class: 'card' },
         h('div', { class: 'who' }, w.name),
         h('div', { class: 'balance' },
-          h('div', { class: 'num', id: 'balance' }, w.balance),
-          h('div', { class: 'lbl' }, w.balance === 1 ? 'ticket' : 'tickets')
+          h('div', { class: 'num', id: 'balance' }, totalTickets(w)),
+          h('div', { class: 'lbl' }, totalTickets(w) === 1 ? 'ticket' : 'tickets')
         ),
-        paperLine(w.paper, 'given to you — bring them to the shop'),
+        paperLine(w, ' — bring the paper ones to the shop'),
         w.paper > 0 ? h('p', { class: 'muted center' }, 'Lost them? A volunteer can move them onto this page.') : null,
         qrBox(w.code),
         h('div', { class: 'codebig' }, w.code),
@@ -570,7 +578,7 @@ function findTab(body) {
             h('div', { class: 'title' }, r.name),
             h('div', { class: 'muted' }, h('span', { class: 'pill' }, r.code), r.contact ? ' ' + r.contact : '')
           ),
-          h('span', { class: 'chg' }, plural(r.balance, 'ticket'), r.paper ? h('div', { class: 'muted' }, '+' + r.paper + ' paper') : null)
+          h('span', { class: 'chg' }, plural(totalTickets(r), 'ticket'), r.paper ? h('div', { class: 'muted' }, splitText(r)) : null)
         )) : [h('li', { class: 'muted' }, 'No matches. Add them under "New donor".')]));
     } catch (e) { toast(errMsg(e), true); }
   };
@@ -749,6 +757,11 @@ function paperChoice() {
   };
   setKind('phone');
   return api;
+}
+
+/** "New balance: 5" (or "New balance: 5 (2 on phone · 3 paper)" for someone holding paper). */
+function balanceText(m) {
+  return 'New balance: ' + totalTickets(m) + (m.paper > 0 ? ' (' + splitText(m) + ')' : '');
 }
 
 /** After giving paper tickets: tell the volunteer exactly what to hand over. */
@@ -947,7 +960,7 @@ function lostPaperPanel(m) {
     const n = count.get();
     await ensureServerUpToDate(5);
     const updated = await call('replaceLostPaper', state.pin, state.staff, m.code, n);
-    renderStaffMember(updated, { ok: 'Moved ' + plural(n, 'paper ticket') + ' to their phone. New balance: ' + updated.balance });
+    renderStaffMember(updated, { ok: 'Moved ' + plural(n, 'paper ticket') + ' to their phone. ' + balanceText(updated) });
   }));
   const panel = h('div', { class: 'hidden', id: 'lostPanel' },
     h('p', { class: 'muted' }, 'Lost or forgot their paper tickets? Ask how many they haven\'t spent yet, and move those onto their phone. If anyone later shows up with those ticket numbers, the lookup will warn that they were reported lost.'),
@@ -990,30 +1003,43 @@ function renderStaffMember(m, flash) {
     await ensureServerUpToDate(paperValue ? 4 : 2);
     const updated = await call('addTickets', state.pin, state.staff, m.code, given, '', paperValue);
     renderStaffMember(updated, { ok: paperValue ? paperFlash(updated, n)
-      : 'Gave ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
+      : 'Gave ' + plural(n, 'ticket') + '. ' + balanceText(updated) });
   }).finally(addLabel));
 
   // Shop: spend tickets on goods.
   const count = stepper(1, 1);
   const note = h('input', { id: 'note', placeholder: 'What they took (optional)', autocomplete: 'off' });
+  // Someone holding paper gets a second button, so their paper count goes down too.
   const redeemBtn = h('button', { class: 'primary full', id: 'redeemBtn' });
-  const spendLabel = (n) => {
-    redeemBtn.textContent = '− Spend ' + plural(n, 'ticket');
+  const paperPayBtn = m.paper > 0 ? h('button', { class: 'primary full', id: 'paperPayBtn' }) : null;
+  const spendLabel = () => {
+    const n = count.get();
+    redeemBtn.textContent = '− Spend ' + plural(n, paperPayBtn ? 'phone ticket' : 'ticket');
     redeemBtn.disabled = n > m.balance;
+    if (paperPayBtn) {
+      paperPayBtn.textContent = '− Collect ' + plural(n, 'paper ticket');
+      paperPayBtn.disabled = n > m.paper;
+    }
   };
-  spendLabel(count.get());
+  spendLabel();
   count.onChange(spendLabel);
   redeemBtn.addEventListener('click', () => busy(redeemBtn, async () => {
     const n = count.get();
     const updated = await call('redeemTickets', state.pin, state.staff, m.code, n, note.value);
-    renderStaffMember(updated, { ok: 'Spent ' + plural(n, 'ticket') + '. New balance: ' + updated.balance });
-  }).finally(() => spendLabel(count.get())));
+    renderStaffMember(updated, { ok: 'Spent ' + plural(n, 'ticket') + '. ' + balanceText(updated) });
+  }).finally(spendLabel));
+  if (paperPayBtn) paperPayBtn.addEventListener('click', () => busy(paperPayBtn, async () => {
+    const n = count.get();
+    await ensureServerUpToDate(7);
+    const updated = await call('collectPaper', state.pin, state.staff, n, note.value, m.code);
+    renderStaffMember(updated, { ok: 'Collected ' + plural(n, 'paper ticket') + '. ' + balanceText(updated) });
+  }).finally(spendLabel));
 
   const givePanel = h('div', {}, items.el, paper.el, addBtn);
   const shopPanel = h('div', {},
     h('p', { class: 'muted' }, 'How many items are they taking?'),
-    count.el, note, redeemBtn,
-    h('p', { class: 'muted' }, 'Paying with paper tickets? ',
+    count.el, note, redeemBtn, paperPayBtn,
+    h('p', { class: 'muted' }, paperPayBtn ? 'Paper tickets that weren\'t given to them? ' : 'Paying with paper tickets? ',
       h('button', { class: 'link inline', id: 'toPaperTab', onclick: () => { state.tab = 'paper'; go({}); } }, 'Collect them in the Paper tab'), '.'));
   const modeBtns = {};
   const setMode = (mode) => {
@@ -1030,7 +1056,7 @@ function renderStaffMember(m, flash) {
 
   const onUndo = (entry, btn) => confirmUndo(btn, async () => {
     const updated = await call('undoEntry', state.pin, state.staff, entry.id);
-    renderStaffMember(updated, { ok: 'Undone. New balance: ' + updated.balance });
+    renderStaffMember(updated, { ok: 'Undone. ' + balanceText(updated) });
   });
 
   // Contact info: phone is required for reminder texts, so flag people who don't have one yet.
@@ -1070,10 +1096,10 @@ function renderStaffMember(m, flash) {
       h('div', { class: 'who' }, m.name),
       contactLine,
       h('div', { class: 'balance' },
-        h('div', { class: 'num', id: 'balance' }, m.balance),
-        h('div', { class: 'lbl' }, m.balance === 1 ? 'ticket' : 'tickets')
+        h('div', { class: 'num', id: 'balance' }, totalTickets(m)),
+        h('div', { class: 'lbl' }, totalTickets(m) === 1 ? 'ticket' : 'tickets')
       ),
-      paperLine(m.paper, 'handed out'),
+      paperLine(m),
       lostPaperPanel(m),
       missingPhone,
       contactForm
